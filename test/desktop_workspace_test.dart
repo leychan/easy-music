@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show PointerDeviceKind;
+import 'dart:ui' show ImageByteFormat, PointerDeviceKind;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:easy_music/account/account.dart';
@@ -29,6 +29,7 @@ import 'package:easy_music/ui/now_playing.dart';
 import 'package:easy_music/ui/player_controls.dart';
 import 'package:easy_music/ui/player_page.dart';
 import 'package:easy_music/ui/workspace_page.dart';
+import 'package:flutter/rendering.dart' show OffsetLayer;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -215,6 +216,51 @@ void main() {
     await tester.pumpAndSettle();
     return player;
   }
+
+  testWidgets('滚动队列时，当前歌曲的背景色留在列表内', (tester) async {
+    final player = await mount(
+      tester, TargetPlatform.android, const Size(390, 760), emptyQueue: true,
+    );
+    player.tracks.value = [
+      for (var index = 0; index < 12; index++)
+        Track(
+          id: 'queue-$index',
+          title: '歌曲 $index',
+          source: Uri.parse('https://example.org/$index.mp3'),
+        ),
+    ];
+    player.playbackState.add(PlaybackState(queueIndex: 0));
+    await tester.tap(find.widgetWithText(NavigationDestination, '队列'));
+    await tester.pumpAndSettle();
+
+    final list = find.byType(ReorderableListView);
+    final scrollable = find.descendant(of: list, matching: find.byType(Scrollable));
+    tester.state<ScrollableState>(scrollable).position.jumpTo(32);
+    await tester.pumpAndSettle();
+
+    final bounds = tester.getRect(list);
+    final theme = Theme.of(tester.element(list));
+    final layer = tester.binding.renderViews.single.debugLayer! as OffsetLayer;
+    await tester.runAsync(() async {
+      // 在列表上边界两侧取样，避开文字、封面和按钮。
+      final image = await layer.toImage(
+        Rect.fromLTWH(bounds.right - 112, bounds.top - 12, 1, 25),
+      );
+      final pixels = (await image.toByteData(format: ImageByteFormat.rawRgba))!;
+      image.dispose();
+
+      Color colorAt(int row) {
+        final offset = row * 4;
+        return Color.fromARGB(
+          pixels.getUint8(offset + 3), pixels.getUint8(offset),
+          pixels.getUint8(offset + 1), pixels.getUint8(offset + 2),
+        );
+      }
+
+      expect(colorAt(0), theme.scaffoldBackgroundColor);
+      expect(colorAt(24), theme.colorScheme.secondaryContainer);
+    });
+  });
 
   testWidgets('Linux 仅搜索页展示搜索栏，底部队列可打开并收起', (tester) async {
     final calls = <Uri>[];

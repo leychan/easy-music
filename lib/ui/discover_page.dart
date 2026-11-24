@@ -1205,7 +1205,7 @@ class _SectionHeader extends StatelessWidget {
         Expanded(
           child: Text(
             title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 20),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 28),
           ),
         ),
         ?trailing,

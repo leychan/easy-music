@@ -836,61 +836,65 @@ class _QueuePanel extends StatelessWidget {
                     ),
                     itemBuilder: (context, index) {
                       final track = tracks[index];
-                      return ListTile(
+                      // ListTile 的底色画在 Material 上，让它随歌曲行一起被列表裁剪。
+                      return Material(
                         key: ValueKey(track.id),
-                        selected: index == current,
-                        selectedTileColor: theme.colorScheme.secondaryContainer,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        leading: Cover(
-                          url: track.artUri?.toString() ?? '',
-                          size: 44,
-                          radius: 8,
-                          icon: track.isLocal
-                              ? Icons.music_note_rounded
-                              : Icons.link_rounded,
-                        ),
-                        title: Text(
-                          track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          track.artist.isEmpty
-                              ? (track.isLocal ? '本地文件' : track.source.host)
-                              : track.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onTap: () => runPlayerAction(
-                          context,
-                          () => onSelect(index),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: '从队列移除',
-                              icon: const Icon(Icons.close_rounded),
-                              onPressed: () => onRemove(track),
-                            ),
-                            if (tracks.length > 1)
-                              ReorderableDragStartListener(
-                                index: index,
-                                child: const Tooltip(
-                                  message: '拖动排序',
-                                  child: SizedBox.square(
-                                    dimension: 40,
-                                    child: Icon(Icons.drag_handle_rounded),
+                        type: MaterialType.transparency,
+                        child: ListTile(
+                          selected: index == current,
+                          selectedTileColor: theme.colorScheme.secondaryContainer,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          leading: Cover(
+                            url: track.artUri?.toString() ?? '',
+                            size: 44,
+                            radius: 8,
+                            icon: track.isLocal
+                                ? Icons.music_note_rounded
+                                : Icons.link_rounded,
+                          ),
+                          title: Text(
+                            track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            track.artist.isEmpty
+                                ? (track.isLocal ? '本地文件' : track.source.host)
+                                : track.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => runPlayerAction(
+                            context,
+                            () => onSelect(index),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: '从队列移除',
+                                icon: const Icon(Icons.close_rounded),
+                                onPressed: () => onRemove(track),
+                              ),
+                              if (tracks.length > 1)
+                                ReorderableDragStartListener(
+                                  index: index,
+                                  child: const Tooltip(
+                                    message: '拖动排序',
+                                    child: SizedBox.square(
+                                      dimension: 40,
+                                      child: Icon(Icons.drag_handle_rounded),
+                                    ),
                                   ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     },
