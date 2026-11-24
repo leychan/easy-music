@@ -616,7 +616,7 @@ void main() {
     expect(writes, ['add', 'remove']);
   });
 
-  testWidgets('Android 切回发现只刷新每日推荐，回前台不刷新', (tester) async {
+  testWidgets('Android 切回发现保留数据和滚动位置，回前台也不刷新', (tester) async {
     final requests = <Uri>[];
     const dailyRoute = '/everyday_song_recommend';
     const playlistsRoute = '/v2/special_recommend';
@@ -674,11 +674,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(discover, findsNothing);
       await tester.tap(find.widgetWithText(NavigationDestination, '发现'));
+      await tester.pump();
+      expect(find.descendant(of: discover, matching: find.byType(LinearProgressIndicator)), findsNothing);
       await tester.pumpAndSettle();
       expect(discover, findsOneWidget);
       expect(offset(), closeTo(savedOffset, 0.01));
     }
-    expect(calls(dailyRoute), 4);
+    expect(calls(dailyRoute), 1);
     expect(calls(playlistsRoute), 1);
 
     for (final state in [
@@ -688,7 +690,7 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(state);
     }
     await tester.pumpAndSettle();
-    expect(calls(dailyRoute), 4);
+    expect(calls(dailyRoute), 1);
     expect(calls(playlistsRoute), 1);
     expect(calls(fmRoute), 0);
     expect(calls(rankRoute), 0);
@@ -699,7 +701,7 @@ void main() {
     expect(find.descendant(of: find.byType(SongListPage), matching: find.byType(FavoriteButton)), findsNothing);
   });
 
-  testWidgets('Linux 返回发现和手动刷新只更新每日推荐，私人 FM 可以继续分页', (tester) async {
+  testWidgets('Linux 返回发现不刷新，手动刷新只更新每日推荐', (tester) async {
     final requests = <Uri>[];
     const fmRoute = '/v2/personal_recommend';
     const dailyRoute = '/everyday_song_recommend';
@@ -721,6 +723,17 @@ void main() {
     );
     expect(find.byTooltip('外观设置'), findsNothing);
     expect(find.text('桌面 FM 1'), findsOneWidget);
+    final discover = find.byType(DiscoverPage);
+    final discoverState = tester.state(discover);
+
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    expect(discover, findsNothing);
+    await tester.tap(find.byTooltip('发现'));
+    await tester.pump();
+    expect(find.descendant(of: discover, matching: find.byType(LinearProgressIndicator)), findsNothing);
+    await tester.pumpAndSettle();
+    expect(tester.state(discover), same(discoverState));
 
     await tester.tap(find.text('我的'));
     await tester.pumpAndSettle();
@@ -736,12 +749,12 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
-    expect([calls(fmRoute), calls(dailyRoute), calls(playlistsRoute)], [1, 2, 1]);
+    expect([calls(fmRoute), calls(dailyRoute), calls(playlistsRoute)], [1, 1, 1]);
     expect(find.text('桌面 FM 1'), findsOneWidget);
 
     await tester.tap(find.byTooltip('刷新每日推荐'));
     await tester.pumpAndSettle();
-    expect([calls(fmRoute), calls(dailyRoute), calls(playlistsRoute)], [1, 3, 1]);
+    expect([calls(fmRoute), calls(dailyRoute), calls(playlistsRoute)], [1, 2, 1]);
     expect(find.text('桌面 FM 1'), findsOneWidget);
 
     await tester.tap(find.byTooltip('私人 FM'));
@@ -1465,16 +1478,15 @@ void main() {
     await tester.tap(autoVip);
     await tester.pumpAndSettle();
     expect(tester.widget<SwitchListTile>(autoVip).value, isFalse);
-    final themeMode = find.widgetWithText(ListTile, '主题模式');
-    expect(find.descendant(of: themeMode, matching: find.text('跟随系统')), findsOneWidget);
-    await tester.tap(themeMode);
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(SimpleDialogOption, '夜间模式'));
-    await tester.pumpAndSettle();
-    expect(find.descendant(of: themeMode, matching: find.text('夜间模式')), findsOneWidget);
+    expect(find.text('主题模式'), findsNothing);
     await tester.tap(find.widgetWithText(ListTile, '外观'));
     await tester.pumpAndSettle();
-    expect(tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '夜间模式')).selected, isTrue);
+    final systemMode = find.widgetWithText(ChoiceChip, '跟随系统');
+    final darkMode = find.widgetWithText(ChoiceChip, '夜间模式');
+    expect(tester.widget<ChoiceChip>(systemMode).selected, isTrue);
+    await tester.tap(darkMode);
+    await tester.pumpAndSettle();
+    expect(tester.widget<ChoiceChip>(darkMode).selected, isTrue);
     final reopened = SessionStore(path);
     addTearDown(reopened.close);
     expect(reopened.readSettings().preferredQuality, AudioQuality.lossless);

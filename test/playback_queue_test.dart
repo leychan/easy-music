@@ -18,8 +18,11 @@ void main() {
     final player = Playback(store);
     await player.addTracks([track('old')]);
     final pending = Completer<List<Track>>();
-    final replacing = player.replaceTracks(pending.future);
+    const preview = MediaItem(id: 'late', title: '新歌单首曲');
+    final replacing = player.replaceTracks(pending.future, preview: preview);
+    expect(player.queuePreparation.value?.preview, same(preview));
     await player.clearQueue();
+    expect(player.queuePreparation.value, isNull);
     pending.complete([track('late')]);
     expect(await replacing, isFalse);
     expect(player.tracks.value, isEmpty);

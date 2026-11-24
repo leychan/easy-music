@@ -56,7 +56,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
   bool _startedRecommendations = false;
   bool _loadingFm = false;
   bool _loadingPlaylists = false;
-  bool _visible = false;
   int _loadAttempt = 0;
 
   @override
@@ -68,7 +67,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _updateVisibility();
+    _loadWhenVisible();
   }
 
   @override
@@ -76,14 +75,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
     super.didUpdateWidget(oldWidget);
     if (widget.userid != oldWidget.userid || widget.library != oldWidget.library) {
       _loadAttempt++;
-      _visible = false;
       _refreshingDaily = null;
       _startedRecommendations = false;
       _loadingFm = _loadingPlaylists = _loadingMoreFm = false;
       _fmError = _moreFmError = _dailyError = _playlistError = null;
       _restore();
     }
-    _updateVisibility();
+    _loadWhenVisible();
   }
 
   void _restore() {
@@ -94,14 +92,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
     _playlists = cache.readPlaylists(owner);
   }
 
-  void _updateVisibility() {
-    // 桌面侧栏会在发现页上盖一层路由，移动端切换标签时则会保留发现页。
+  void _loadWhenVisible() {
+    // 仅在首次打开或更换账号后自动加载，切回发现时继续显示原有结果。
+    if (_startedRecommendations) return;
     final visible = widget.active && (!widget.desktop || (ModalRoute.isCurrentOf(context) ?? true));
-    if (visible && !_visible) {
-      if (!_startedRecommendations) _loadRecommendations();
-      unawaited(_refreshDaily());
-    }
-    _visible = visible;
+    if (!visible) return;
+    _loadRecommendations();
+    unawaited(_refreshDaily());
   }
 
   void _loadRecommendations() {

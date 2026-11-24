@@ -72,52 +72,6 @@ void _updateAppearance(
   }
 }
 
-/// 在设置中直接切换模式，与外观页共用同一份偏好。
-class ThemeModeTile extends StatelessWidget {
-  const ThemeModeTile({super.key, required this.appearance});
-
-  final Appearance appearance;
-
-  Future<void> _selectMode(BuildContext context, ThemeMode current) async {
-    final mode = await showDialog<ThemeMode>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('主题模式'),
-        children: [
-          for (final entry in _themeModeLabels.entries)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(context).pop(entry.key),
-              child: Semantics(
-                selected: entry.key == current,
-                child: Row(
-                  children: [
-                    Expanded(child: Text(entry.value)),
-                    if (entry.key == current) const Icon(Icons.check_rounded),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-    if (context.mounted && mode != null && mode != appearance.value.mode) {
-      _updateAppearance(context, appearance, mode: mode);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: appearance,
-    builder: (context, options, _) => ListTile(
-      leading: const Icon(Icons.brightness_6_outlined),
-      title: const Text('主题模式'),
-      subtitle: Text(_themeModeLabels[options.mode]!),
-      trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: () => _selectMode(context, options.mode),
-    ),
-  );
-}
-
 class AppearancePage extends StatelessWidget {
   const AppearancePage({super.key, required this.appearance});
   final Appearance appearance;

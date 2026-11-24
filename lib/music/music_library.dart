@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show File;
 
+import 'package:audio_service/audio_service.dart' show MediaItem;
 import 'package:flutter/foundation.dart';
 import 'package:synchronized/synchronized.dart';
 
@@ -588,6 +589,9 @@ class MusicLibrary extends ChangeNotifier {
     return url.isEmpty ? null : Uri.tryParse(url);
   }
 
+  Uri? _songCover(Song song) =>
+      _coverUri(song.albumImage) ?? _coverUri(_cachedCover(song.albumId, song.albumAudioId) ?? '');
+
   /// 取（并缓存）播放地址。
   ///
   /// 同一首歌在当前登录会话里反复播放时可以复用已取到的地址。
@@ -627,7 +631,7 @@ class MusicLibrary extends ChangeNotifier {
           : Uri.parse(url.url),
       duration: song.duration,
       artist: song.artist,
-      artUri: _coverUri(song.albumImage) ?? _coverUri(_cachedCover(song.albumId, song.albumAudioId) ?? ''),
+      artUri: _songCover(song),
       albumAudioId: song.albumAudioId,
       albumId: song.albumId,
       audioQuality: url?.quality,
@@ -756,10 +760,14 @@ class MusicLibrary extends ChangeNotifier {
     if (songs.isEmpty) return const PlaybackOutcome.unavailable();
     try {
       final owner = _account.session?.userid;
+      final first = songs.first;
       final resolved = _resolveTracks(songs, player.preferredQuality.value);
       final seen = {for (final song in songs) song.id};
       final started = await player.replaceTracks(
         resolved.then((result) => _disposed || _account.session?.userid != owner ? const [] : result.$1),
+        preview: MediaItem(
+          id: first.id, title: first.title, artist: first.artist, artUri: _songCover(first),
+        ),
         loadMore: privateFm && owner != null ? () => _moreFmTracks(player, owner, seen) : null,
       );
       if (!started) return const PlaybackOutcome.unavailable();

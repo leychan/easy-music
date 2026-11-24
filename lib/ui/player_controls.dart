@@ -52,7 +52,8 @@ class PlayerControls extends StatelessWidget {
             final playing = state.playing;
             final buffering =
                 playing &&
-                (state.processingState == AudioProcessingState.buffering ||
+                (state.processingState == AudioProcessingState.idle ||
+                    state.processingState == AudioProcessingState.buffering ||
                     state.processingState == AudioProcessingState.loading);
 
             return Column(
@@ -100,30 +101,40 @@ class PlayerControls extends StatelessWidget {
                                 runPlayerAction(context, player.skipToPrevious),
                     ),
                     if (!compact) const SizedBox(width: 12),
-                    (stage ? IconButton.new : IconButton.filled)(
-                      iconSize: stage ? 50 : (compact ? 22 : 28),
-                      tooltip: playing ? '暂停' : '播放',
-                      icon: buffering
-                          ? SizedBox.square(
-                              dimension: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: stage
-                                    ? colors.onSurface
-                                    : colors.onPrimary,
-                              ),
-                            )
-                          : Icon(
-                              playing
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                            ),
-                      onPressed: index == null
-                          ? null
-                          : () => runPlayerAction(
-                              context,
-                              playing ? player.pause : player.play,
-                            ),
+                    ValueListenableBuilder(
+                      valueListenable: player.queuePreparation,
+                      builder: (context, preparation, _) {
+                        final preparing = preparation != null;
+                        return (stage ? IconButton.new : IconButton.filled)(
+                          iconSize: stage ? 50 : (compact ? 22 : 28),
+                          tooltip: preparing
+                              ? '正在准备播放'
+                              : (playing ? '暂停' : '播放'),
+                          icon: preparing || buffering
+                              ? SizedBox.square(
+                                  dimension: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: preparing
+                                        ? colors.primary
+                                        : (stage
+                                              ? colors.onSurface
+                                              : colors.onPrimary),
+                                  ),
+                                )
+                              : Icon(
+                                  playing
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
+                                ),
+                          onPressed: preparing || index == null
+                              ? null
+                              : () => runPlayerAction(
+                                  context,
+                                  playing ? player.pause : player.play,
+                                ),
+                        );
+                      },
                     ),
                     if (!compact) const SizedBox(width: 12),
                     IconButton(

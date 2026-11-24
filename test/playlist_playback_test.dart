@@ -10,7 +10,9 @@ import 'package:easy_music/music/song.dart';
 import 'package:easy_music/player/playback.dart';
 import 'package:easy_music/player/session_store.dart';
 import 'package:easy_music/player/track.dart';
+import 'package:easy_music/ui/cover.dart';
 import 'package:easy_music/ui/discover_page.dart';
+import 'package:easy_music/ui/mini_player_bar.dart';
 import 'package:easy_music/ui/now_playing.dart';
 import 'package:easy_music/ui/song_tile.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -203,6 +205,61 @@ void main() {
     expect(player.tracks.value.map((track) => track.id), songs.map((song) => song.id));
     expect(player.playbackState.value.queueIndex, 0);
   });
+
+  testWidgets('点击全部播放后，播放栏立即展示第一首歌并转圈，失败时恢复原曲目', (tester) async {
+    final store = SessionStore(':memory:');
+    final account = Account();
+    final player = Playback(store);
+    final pending = Completer<SongUrl?>();
+    const first = Song(
+      hash: 'ABC', title: '新歌单首曲', albumAudioId: 1,
+      singers: ['新歌手'], albumImage: 'https://example.org/first.jpg',
+    );
+    final old = Track(
+      id: 'old', title: '旧歌曲', artist: '旧歌手',
+      source: Uri.parse('https://example.org/old.mp3'),
+      artUri: Uri.parse('https://example.org/old.jpg'),
+    );
+    final library = _TestLibrary(account)
+      ..daily = [first]
+      ..firstRequest = pending.future;
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    addTearDown(library.dispose);
+    player.tracks.value = [old];
+    player.playbackState.add(PlaybackState(queueIndex: 0));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+      body: DiscoverPage(library: library, player: player, userid: null),
+      bottomNavigationBar: MiniPlayerBar(
+        player: player, library: library, onOpen: ({required showLyrics}) {},
+      ),
+    )));
+    await tester.pumpAndSettle();
+
+    final bar = find.byType(MiniPlayerBar);
+    Finder barText(String text) => find.descendant(of: bar, matching: find.text(text));
+    String barCover() => tester.widget<Cover>(
+      find.descendant(of: bar, matching: find.byType(Cover)),
+    ).url;
+    final spinner = find.descendant(of: bar, matching: find.byType(CircularProgressIndicator));
+    expect(spinner, findsNothing);
+    expect(barText(old.title), findsOneWidget);
+    await tester.tap(find.byTooltip('全部播放'));
+    await tester.pump();
+    expect(library.requested, [first.id]);
+    expect(player.tracks.value, [old]);
+    expect(barText(old.title), findsNothing);
+    expect(barText(first.title), findsOneWidget);
+    expect(barText(first.artist), findsOneWidget);
+    expect(barCover(), first.coverUrl(480));
+    expect(spinner, findsOneWidget);
+
+    pending.complete(null);
+    await tester.pumpAndSettle();
+    expect(spinner, findsNothing);
+    expect(barText(old.title), findsOneWidget);
+    expect(barCover(), old.artUri.toString());
+  });
 }
 
 class _TestLibrary extends MusicLibrary {
@@ -231,7 +288,7 @@ class _TestLibrary extends MusicLibrary {
   }) async {
     requested.add(song.id);
     if (song == _unavailable) return null;
-    if (song == _first && firstRequest != null) return firstRequest;
+    if (song.id == _first.id && firstRequest != null) return firstRequest;
     return _url;
   }
 }
@@ -248,7 +305,11 @@ class _TestPlayer extends Playback {
   }
 
   @override
-  Future<bool> replaceTracks(FutureOr<List<Track>> items, {Future<List<Track>> Function()? loadMore}) async {
+  Future<bool> replaceTracks(
+    FutureOr<List<Track>> items, {
+    MediaItem? preview,
+    Future<List<Track>> Function()? loadMore,
+  }) async {
     final ready = await items;
     if (ready.isEmpty) return false;
     _publishTracks(ready, ready.first.id);

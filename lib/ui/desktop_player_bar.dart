@@ -36,23 +36,26 @@ class DesktopPlayerBar extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 5, 8, 3),
-        child: ValueListenableBuilder(
-          valueListenable: player.tracks,
-          builder: (context, tracks, _) => StreamBuilder<PlaybackState>(
+        child: ListenableBuilder(
+          listenable: Listenable.merge([player.tracks, player.queuePreparation]),
+          builder: (context, _) => StreamBuilder<PlaybackState>(
             stream: player.playbackState,
             initialData: player.playbackState.value,
             builder: (context, snapshot) {
               final state = snapshot.data!;
+              final tracks = player.tracks.value;
               final index = state.queueIndex;
-              final track = index == null
+              final current = index == null
                   ? null
                   : tracks.elementAtOrNull(index);
+              final preview = player.queuePreparation.value?.preview;
+              final track = preview == null ? current : null;
               return LayoutBuilder(
                 builder: (context, constraints) {
                   final wide = constraints.maxWidth >= 680;
                   final compactActions = constraints.maxWidth < 600;
                   final gap = wide ? 16.0 : 6.0;
-                  final identity = _identity(context, track);
+                  final identity = _identity(context, track, preview);
                   final controls = Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     mainAxisSize: MainAxisSize.min,
@@ -148,7 +151,7 @@ class DesktopPlayerBar extends StatelessWidget {
                         padding: wide ? null : const EdgeInsets.symmetric(horizontal: 4),
                       ),
                       child: PlaybackSeekBar(
-                        key: ValueKey(track?.id),
+                        key: ValueKey(current?.id),
                         player: player,
                         duration: snapshot.data?.duration,
                       ),
@@ -211,8 +214,9 @@ class DesktopPlayerBar extends StatelessWidget {
     ),
   );
 
-  Widget _identity(BuildContext context, Track? track) {
+  Widget _identity(BuildContext context, Track? track, MediaItem? preview) {
     final theme = Theme.of(context);
+    final artist = preview?.artist ?? track?.artist;
     return InkWell(
       borderRadius: BorderRadius.circular(10),
       onTap: track == null ? null : () => onOpen(showLyrics: false),
@@ -221,7 +225,7 @@ class DesktopPlayerBar extends StatelessWidget {
         child: Row(
           children: [
             Cover(
-              url: track?.artUri?.toString() ?? '',
+              url: (preview?.artUri ?? track?.artUri)?.toString() ?? '',
               size: 47,
               radius: 9,
               icon: Icons.album_outlined,
@@ -233,16 +237,16 @@ class DesktopPlayerBar extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    track?.title ?? '尚未选择音乐',
+                    preview?.title ?? track?.title ?? '尚未选择音乐',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  if (track != null && track.artist.isNotEmpty)
+                  if (artist != null && artist.isNotEmpty)
                     Text(
-                      track.artist,
+                      artist,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(

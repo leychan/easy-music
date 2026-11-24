@@ -370,7 +370,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           library: _library,
           player: player,
           section: section,
-          content: _buildSection(section, desktop: true),
+          discover: _buildSection(
+            AppSection.discover, desktop: true, active: section == AppSection.discover,
+          ),
+          content: section == AppSection.discover ? null : _buildSection(section, desktop: true),
           queue: _queuePanel(),
           sidebarActions: [_addMusicMenu(), if (Platform.isLinux) _desktopMenu()],
           onSelect: (section) => _section.value = section,

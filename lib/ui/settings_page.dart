@@ -77,8 +77,7 @@ class SettingsPage extends StatelessWidget {
               },
             ),
           ),
-          if (appearance case final appearance?) ...[
-            ThemeModeTile(appearance: appearance),
+          if (appearance case final appearance?)
             ListTile(
               leading: const Icon(Icons.palette_outlined),
               title: const Text('外观'),
@@ -87,7 +86,6 @@ class SettingsPage extends StatelessWidget {
                 builder: (_) => AppearancePage(appearance: appearance),
               )),
             ),
-          ],
           ListTile(
             leading: const Icon(Icons.info_outline_rounded),
             title: const Text('关于'),

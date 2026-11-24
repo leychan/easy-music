@@ -14,6 +14,12 @@ import 'track.dart';
 
 enum SleepAction { pause, exit }
 
+class QueuePreparation {
+  const QueuePreparation(this.preview);
+
+  final MediaItem? preview;
+}
+
 /// 界面与系统媒体控制共用这个队列和播放器。
 class Playback extends BaseAudioHandler {
   Playback(this._store, {this.audioCache}) {
@@ -31,6 +37,7 @@ class Playback extends BaseAudioHandler {
   final preferredQuality = ValueNotifier(AudioQuality.standard);
   final sleepDeadline = ValueNotifier<DateTime?>(null);
   final fadeMilliseconds = ValueNotifier(0);
+  final _queuePreparation = ValueNotifier<QueuePreparation?>(null);
   Future<void> Function()? onSleepExit;
   bool Function(Track)? isNotificationFavorite;
   Future<void> Function(Track)? onToggleNotificationFavorite;
@@ -52,6 +59,9 @@ class Playback extends BaseAudioHandler {
   double _volume = 1;
   int _fadeGeneration = 0;
   int? _pendingFadeIn;
+
+  /// 等待新队列时给界面展示「全部播放」的首曲，实际播放状态由媒体会话报告。
+  ValueListenable<QueuePreparation?> get queuePreparation => _queuePreparation;
 
   int get index => _player.processingState == audio.ProcessingState.idle
       ? _selectedIndex
@@ -201,20 +211,29 @@ class Playback extends BaseAudioHandler {
   /// 用一份新列表替换整个队列，避免旧歌曲排在新列表中间。
   Future<bool> replaceTracks(
     FutureOr<List<Track>> items, {
+    MediaItem? preview,
     Future<List<Track>> Function()? loadMore,
   }) async {
     final request = ++_queueReplacement;
-    final ready = await items;
-    return _commands.synchronized(() async {
-      // 取地址期间如果点了清空或另一份列表，丢弃这次较早的请求。
-      if (request != _queueReplacement || ready.isEmpty) return false;
-      await _replaceQueue(ready, loadMore: loadMore);
-      return true;
-    });
+    _queuePreparation.value = QueuePreparation(preview);
+    try {
+      final ready = await items;
+      return await _commands.synchronized(() async {
+        // 取地址期间如果点了清空或另一份列表，丢弃这次较早的请求。
+        if (request != _queueReplacement || ready.isEmpty) return false;
+        if (preview != null) _queuePreparation.value = QueuePreparation(_mediaItem(ready.first));
+        await _replaceQueue(ready, loadMore: loadMore);
+        return true;
+      });
+    } finally {
+      // 较早的请求结束时，较新的请求可能还在取地址。
+      if (request == _queueReplacement) _queuePreparation.value = null;
+    }
   }
 
   Future<void> clearQueue() {
     _queueReplacement++;
+    _queuePreparation.value = null;
     return _commands.synchronized(() => _replaceQueue(const []));
   }
 

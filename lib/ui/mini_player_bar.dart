@@ -27,15 +27,18 @@ class MiniPlayerBar extends StatelessWidget {
   final void Function({required bool showLyrics}) onOpen;
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder(
-    valueListenable: player.tracks,
-    builder: (context, tracks, _) => StreamBuilder<PlaybackState>(
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([player.tracks, player.queuePreparation]),
+    builder: (context, _) => StreamBuilder<PlaybackState>(
       stream: player.playbackState,
       initialData: player.playbackState.value,
       builder: (context, snapshot) {
         final state = snapshot.requireData;
         final index = state.queueIndex;
-        final track = index == null ? null : tracks.elementAtOrNull(index);
+        final preview = player.queuePreparation.value?.preview;
+        final track = preview == null && index != null
+            ? player.tracks.value.elementAtOrNull(index)
+            : null;
         return Center(
           heightFactor: 1,
           child: ConstrainedBox(
@@ -45,7 +48,7 @@ class MiniPlayerBar extends StatelessWidget {
               child: LayoutBuilder(
                 builder: (context, bounds) => Row(
                   children: [
-                    Expanded(child: _identity(track, state)),
+                    Expanded(child: _identity(track, state, preview)),
                     const SizedBox(width: 8),
                     // 极窄时先给圆形封面留位置，再收紧控制区。
                     ConstrainedBox(
@@ -67,9 +70,11 @@ class MiniPlayerBar extends StatelessWidget {
     ),
   );
 
-  Widget _identity(Track? track, PlaybackState state) {
-    final title = track?.title ?? '尚未选择音乐';
-    final artist = track == null
+  Widget _identity(Track? track, PlaybackState state, MediaItem? preview) {
+    final title = preview?.title ?? track?.title ?? '尚未选择音乐';
+    final artist = preview != null
+        ? preview.artist
+        : track == null
         ? '从发现或搜索里挑一首'
         : track.artist.isNotEmpty
         ? track.artist
@@ -77,8 +82,8 @@ class MiniPlayerBar extends StatelessWidget {
         ? '本地文件'
         : '在线音乐';
     final cover = _SpinningCover(
-      key: ValueKey(track?.id),
-      url: track?.artUri?.toString() ?? '',
+      key: ValueKey(preview?.id ?? track?.id),
+      url: (preview?.artUri ?? track?.artUri)?.toString() ?? '',
       spinning:
           track != null &&
           state.playing &&
@@ -120,14 +125,15 @@ class MiniPlayerBar extends StatelessWidget {
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                Text(
-                                  artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                if (artist != null)
+                                  Text(
+                                    artist,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
                                   ),
-                                ),
                               ],
                             ),
                           ),

@@ -26,6 +26,7 @@ class DesktopWorkspace extends StatefulWidget {
     required this.library,
     required this.player,
     required this.section,
+    required this.discover,
     required this.content,
     required this.queue,
     required this.sidebarActions,
@@ -37,7 +38,8 @@ class DesktopWorkspace extends StatefulWidget {
   final MusicLibrary library;
   final Playback player;
   final AppSection section;
-  final Widget content;
+  final Widget discover;
+  final Widget? content;
   final Widget queue;
   final List<Widget> sidebarActions;
   final ValueChanged<AppSection> onSelect;
@@ -156,19 +158,30 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
         observers: [_contentObserver],
         pages: [
           MaterialPage<void>(
-            key: ValueKey(widget.section),
-            // 搜索栏属于搜索路由，右侧打开详情时会和搜索结果一起隐藏。
-            child: widget.section == AppSection.search
-                ? WorkspacePage(
-                    title: const Text('搜索音乐'),
-                    body: Column(
-                      children: [
-                        Builder(builder: _searchBar),
-                        Expanded(child: widget.content),
-                      ],
-                    ),
-                  )
-                : widget.content,
+            // 保留发现页和滚动位置，侧栏切换时只隐藏它。
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Visibility(
+                  visible: widget.section == AppSection.discover,
+                  maintainState: true,
+                  child: widget.discover,
+                ),
+                if (widget.content case final content?)
+                  // 右侧打开详情时，搜索栏和搜索结果一起隐藏。
+                  widget.section == AppSection.search
+                      ? WorkspacePage(
+                          title: const Text('搜索音乐'),
+                          body: Column(
+                            children: [
+                              Builder(builder: _searchBar),
+                              Expanded(child: content),
+                            ],
+                          ),
+                        )
+                      : content,
+              ],
+            ),
           ),
           if (_sidebarPage case final selected?) selected.page,
         ],
