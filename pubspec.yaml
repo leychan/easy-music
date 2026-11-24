@@ -1,0 +1,40 @@
+name: easy_music
+description: 本地和在线直链音乐播放器，支持 Linux 和 Android。
+publish_to: none
+version: 0.1.0+4011
+
+environment:
+  sdk: ^3.14.0
+  flutter: ">=3.50.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  android_file_picker: ^2.2.0
+  audio_service: ^0.18.19
+  audio_service_mpris: ^0.2.1
+  file_picker: ^13.4.0
+  flutter_secure_storage: ^10.0.0
+  http: ^1.5.0
+  just_audio: ^0.10.5
+  just_audio_media_kit: ^2.1.0
+  media_kit_libs_linux: ^1.2.1
+  material_ui: ^1.0.0
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  pointycastle: ^4.0.0
+  sqlite3: ^3.0.0
+  synchronized: ^3.4.0
+  uuid: ^4.6.0
+  crypto: ^3.0.8
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - LICENSE
+    - THIRD_PARTY_NOTICES

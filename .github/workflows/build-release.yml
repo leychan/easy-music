@@ -1,0 +1,254 @@
+name: Build and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  FLUTTER_VERSION: '3.50.1'
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      app_version: ${{ steps.version.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Read and check the release version
+        id: version
+        run: |
+          app_version=$(awk '/^version: / { split($2, version, "+"); print version[1]; exit }' pubspec.yaml)
+          if [[ ! "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::pubspec.yaml does not contain a valid app version."
+            exit 1
+          fi
+          # AUR 的稳定版本只接收 v主版本.次版本.修订号，且必须与项目版本一致。
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            if [[ ! "$app_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$GITHUB_REF_NAME" != "v$app_version" ]]; then
+              echo "::error::Release tag must be vX.Y.Z and match the version in pubspec.yaml."
+              exit 1
+            fi
+          fi
+          printf 'app_version=%s\n' "$app_version" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libmpv-dev libdbusmenu-glib-dev
+      - name: Build Linux x86_64 archive
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build linux --release --no-pub
+          bash tool/package_linux_release.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: linux-x86_64
+          path: build/release/easy-music-*-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  android:
+    needs: version
+    runs-on: ubuntu-24.04
+    # 分支只构建调试版，正式密钥只交给带版本标签的构建。
+    environment: ${{ github.ref_type == 'tag' && 'release' || 'ci' }}
+    env:
+      APP_VERSION: ${{ needs.version.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+      - name: Install the Flutter 3.50 Android NDK
+        run: sdkmanager 'ndk;28.2.13676358'
+      - run: flutter pub get --enforce-lockfile
+      - name: Build Android ARM64 debug APK
+        if: github.ref_type != 'tag'
+        run: |
+          flutter build apk --debug --target-platform android-arm64 --no-pub
+          mkdir -p build/release
+          cp build/app/outputs/flutter-apk/app-debug.apk "build/release/easy-music-$APP_VERSION-android-arm64-debug.apk"
+      - name: Build and verify signed Android ARM64 APK
+        if: github.ref_type == 'tag'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p build/release
+          : "${ANDROID_KEYSTORE_BASE64:?Missing ANDROID_KEYSTORE_BASE64}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Missing ANDROID_KEYSTORE_PASSWORD}"
+          : "${ANDROID_KEY_ALIAS:?Missing ANDROID_KEY_ALIAS}"
+          : "${ANDROID_KEY_PASSWORD:?Missing ANDROID_KEY_PASSWORD}"
+          signing_dir=$(mktemp -d "$RUNNER_TEMP/easy-music-signing.XXXXXX")
+          trap 'rm -rf -- "$signing_dir"' EXIT
+          (
+            umask 077
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$signing_dir/release.jks"
+            printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD" > "$signing_dir/key.properties"
+          )
+          unset ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD
+          EASY_MUSIC_ANDROID_KEY_PROPERTIES="$signing_dir/key.properties" \
+            flutter build apk --release --target-platform android-arm64 --no-pub
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          signer=$("$apksigner" verify --print-certs "$apk" | awk -F ': ' '/certificate SHA-256 digest:/ { print $2 }')
+          # 正式产物必须使用已生成的 Easy Music 证书。
+          if [[ "$signer" != 998c0d33f8c2d8d6d34417ce2491dcdafc63bfb631d451a5cf7e60690a6da26a ]]; then
+            echo "::error::The APK signer does not match the Easy Music release certificate."
+            exit 1
+          fi
+          cp "$apk" "build/release/easy-music-$APP_VERSION-android-arm64.apk"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: android-arm64
+          path: build/release/easy-music-*-android-arm64*.apk
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version, linux, android]
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: easy-music-release-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish Release with both verified builds
+        working-directory: release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          linux_archive="easy-music-$APP_VERSION-linux-x86_64.tar.gz"
+          android_apk="easy-music-$APP_VERSION-android-arm64.apk"
+          sha256sum "$linux_archive" "$android_apk" > SHA256SUMS
+
+          if ! draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null); then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --draft
+            draft=true
+          fi
+          # 重跑时保留已发布资产，避免改动已被 AUR 引用的压缩包。
+          if [[ "$draft" == false ]]; then
+            existing=$(mktemp -d)
+            gh release download "$GITHUB_REF_NAME" --dir "$existing" \
+              --pattern SHA256SUMS --pattern "$linux_archive" --pattern "$android_apk"
+            test -f "$existing/$linux_archive"
+            test -f "$existing/$android_apk"
+            (cd "$existing" && sha256sum --check SHA256SUMS)
+          else
+            gh release upload "$GITHUB_REF_NAME" --clobber "$linux_archive" "$android_apk" SHA256SUMS
+            gh release edit "$GITHUB_REF_NAME" --draft=false
+          fi
+          if [[ "$REPOSITORY_PRIVATE" == true ]]; then
+            echo "AUR was skipped because the GitHub release is private." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  aur:
+    if: github.ref_type == 'tag' && !github.event.repository.private
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: easy-music-aur
+      cancel-in-progress: false
+    environment: aur
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Verify the public release and prepare AUR metadata
+        env:
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+        run: |
+          if ! grep -qE '^license=\([[:space:]]*[^()[:space:]]' packaging/aur/PKGBUILD; then
+            echo "::error::Set the project's distribution license in PKGBUILD before AUR publication."
+            exit 1
+          fi
+          work_dir="$RUNNER_TEMP/aur-package"
+          mkdir -p "$work_dir"
+          linux_archive="easy-music-$APP_VERSION-linux-x86_64.tar.gz"
+          release_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          curl -fLsS --retry 3 --output "$work_dir/$linux_archive" "$release_url/$linux_archive"
+          curl -fLsS --retry 3 --output "$work_dir/SHA256SUMS" "$release_url/SHA256SUMS"
+          (cd "$work_dir" && sha256sum --ignore-missing --check SHA256SUMS)
+          python3 tool/prepare_aur_release.py "$work_dir/$linux_archive" "$work_dir"
+
+          # 用 Arch 的 makepkg 校验并生成 AUR 要求的元数据。
+          arch=(docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp \
+            --volume "$work_dir:/package" --workdir /package archlinux:base-devel)
+          "${arch[@]}" makepkg --verifysource
+          "${arch[@]}" makepkg --printsrcinfo > "$work_dir/.SRCINFO"
+      - name: Update easy-music-bin on AUR
+        env:
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_SSH_KNOWN_HOSTS: ${{ vars.AUR_SSH_KNOWN_HOSTS }}
+        run: |
+          : "${AUR_SSH_PRIVATE_KEY:?Missing AUR_SSH_PRIVATE_KEY}"
+          : "${AUR_SSH_KNOWN_HOSTS:?Missing AUR_SSH_KNOWN_HOSTS}"
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/aur-ssh.XXXXXX")
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          (
+            umask 077
+            printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/key"
+            printf '%s\n' "$AUR_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          )
+          unset AUR_SSH_PRIVATE_KEY
+          export GIT_SSH_COMMAND="ssh -i '$ssh_dir/key' -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$ssh_dir/known_hosts'"
+          aur_repo="$RUNNER_TEMP/aur-git"
+          git clone ssh://aur@aur.archlinux.org/easy-music-bin.git "$aur_repo"
+          cd "$aur_repo"
+
+          # 较早标签的重跑不能让 AUR 版本回退。
+          if [[ -f .SRCINFO ]]; then
+            current=$(awk '$1 == "pkgver" { print $3; exit }' .SRCINFO)
+            if [[ "$(printf '%s\n' "$current" "$APP_VERSION" | sort -V | tail -n 1)" != "$APP_VERSION" ]]; then
+              echo "AUR already has a newer version ($current)."
+              exit 0
+            fi
+          fi
+          work_dir="$RUNNER_TEMP/aur-package"
+          cp "$work_dir"/{PKGBUILD,.SRCINFO,dev.easymusic.easy_music.desktop} .
+          git add PKGBUILD .SRCINFO dev.easymusic.easy_music.desktop
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git -c user.name="Easy Music 发布机器人" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "发布 Easy Music $APP_VERSION"
+          git push origin HEAD:master

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- 会话密文与本机 Keystore 绑定，避免复制到另一台设备。 -->
+    <exclude domain="sharedpref" path="EasyMusicAccount.xml"/>
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage:EasyMusicAccount.xml"/>
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:EasyMusicAccount.xml"/>
+</full-backup-content>

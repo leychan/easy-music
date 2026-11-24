@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="playback_notification_empty">添加歌曲后即可播放</string>
+    <string name="playback_notification_previous">上一首</string>
+    <string name="playback_notification_play">播放</string>
+    <string name="playback_notification_pause">暂停</string>
+    <string name="playback_notification_next">下一首</string>
+    <string name="playback_notification_like">喜欢</string>
+    <string name="playback_notification_unlike">取消喜欢</string>
+
+    <!-- 通知栏的自定义视图由系统加载，直接使用随系统日夜切换的图标颜色。 -->
+    <color name="playback_notification_icon">#212121</color>
+
+    <style name="PlaybackNotificationCover">
+        <item name="android:background">@drawable/playback_notification_cover_background</item>
+        <item name="android:clipToOutline">true</item>
+        <item name="android:scaleType">centerCrop</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:layout_marginEnd">10dp</item>
+    </style>
+
+    <style name="PlaybackNotificationTitle" parent="TextAppearance.Compat.Notification.Title">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+
+    <style name="PlaybackNotificationArtist" parent="TextAppearance.Compat.Notification.Line2">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+
+    <style name="PlaybackNotificationButton">
+        <item name="android:layout_width">34dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:background">?android:attr/selectableItemBackgroundBorderless</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:tint">@color/playback_notification_icon</item>
+    </style>
+
+    <style name="PlaybackNotificationButton.Expanded">
+        <item name="android:layout_width">44dp</item>
+    </style>
+</resources>

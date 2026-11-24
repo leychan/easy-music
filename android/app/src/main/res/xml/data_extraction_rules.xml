@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="EasyMusicAccount.xml"/>
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:EasyMusicAccount.xml"/>
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:EasyMusicAccount.xml"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="EasyMusicAccount.xml"/>
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:EasyMusicAccount.xml"/>
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:EasyMusicAccount.xml"/>
+    </device-transfer>
+</data-extraction-rules>

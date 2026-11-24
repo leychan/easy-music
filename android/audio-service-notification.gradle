@@ -1,0 +1,77 @@
+// audio_service 没有通知布局入口。在构建目录生成带入口的 Java 源码，保留原插件的播放服务。
+abstract class GeneratePlaybackNotificationAudioService extends DefaultTask {
+    @InputFile
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract RegularFileProperty getUpstream()
+
+    @OutputDirectory
+    abstract DirectoryProperty getGenerated()
+
+    @TaskAction
+    void generateSource() {
+        def source = upstream.get().asFile.getText('UTF-8')
+        def replaceOnce = { before, after ->
+            if (source.count(before) != 1) {
+                throw new GradleException('audio_service 的通知实现已变化，请检查 audio-service-notification.gradle。')
+            }
+            source = source.replace(before, after)
+        }
+
+        replaceOnce('    private boolean notificationCreated;', '''    private boolean notificationCreated;
+    private boolean showNotificationBeforePlayback;
+
+    public interface PlaybackNotificationFactory {
+        Notification buildPlaybackNotification(NotificationCompat.Builder builder,
+                MediaControllerCompat controller, PendingIntent openIntent, boolean playing);
+    }
+
+    // 恢复上次队列时显示同一张通知，首次播放再把它提升为前台服务通知。
+    public static void showPlaybackNotification() {
+        if (instance != null) {
+            instance.showNotificationBeforePlayback = true;
+            instance.updateNotification();
+        }
+    }''')
+
+        replaceOnce('        NotificationCompat.Builder builder = getNotificationBuilder();', '''        NotificationCompat.Builder builder = getNotificationBuilder();
+        if (getApplication() instanceof PlaybackNotificationFactory) {
+            return ((PlaybackNotificationFactory) getApplication()).buildPlaybackNotification(
+                    builder, mediaSession.getController(),
+                    config.androidNotificationClickStartsActivity ? contentIntent : null, playing);
+        }''')
+
+        replaceOnce('''    private void updateNotification() {
+        if (notificationCreated) {''', '''    private void updateNotification() {
+        if (notificationCreated || showNotificationBeforePlayback) {''')
+
+        replaceOnce('''        // Force cancellation of the notification
+        getNotificationManager().cancel(NOTIFICATION_ID);''', '''        // 停止播放后丢弃已排队的通知刷新。
+        notificationCreated = false;
+        showNotificationBeforePlayback = false;
+        getNotificationManager().cancel(NOTIFICATION_ID);''')
+
+        replaceOnce('''        ServiceCompat.stopForeground(this, config.androidResumeOnClick ? STOP_FOREGROUND_DETACH : STOP_FOREGROUND_REMOVE);''', '''        ServiceCompat.stopForeground(this, config.androidResumeOnClick ? STOP_FOREGROUND_DETACH : STOP_FOREGROUND_REMOVE);
+        if (getApplication() instanceof PlaybackNotificationFactory) {
+            getNotificationManager().cancel(NOTIFICATION_ID);
+        }''')
+
+        // 源目录按相对路径排除插件原文件，生成文件直接放在另一源目录的根下。
+        def output = generated.get().file('AudioService.java').asFile
+        output.parentFile.mkdirs()
+        output.setText(source, 'UTF-8')
+    }
+}
+
+def audioService = project(':audio_service')
+audioService.plugins.withId('com.android.library') {
+    def sourcePath = 'com/ryanheise/audioservice/AudioService.java'
+    audioService.android.sourceSets.main.java.exclude(sourcePath)
+    def generate = audioService.tasks.register('generatePlaybackNotificationAudioService', GeneratePlaybackNotificationAudioService) {
+        upstream.set(audioService.layout.projectDirectory.file("src/main/java/$sourcePath"))
+        generated.set(audioService.layout.buildDirectory.dir('generated/playbackNotification'))
+    }
+    def components = audioService.androidComponents
+    components.onVariants(components.selector().all(), { variant ->
+        variant.sources.java.addGeneratedSourceDirectory(generate) { task -> task.generated }
+    } as Action)
+}

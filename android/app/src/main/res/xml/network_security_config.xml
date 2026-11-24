@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <!-- 音频缓存只在本机回环地址向播放器提供数据。 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+    <!-- 酷狗部分音频地址仍用 HTTP，兼容范围限于酷狗服务域名。 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">kugou.com</domain>
+    </domain-config>
+</network-security-config>
