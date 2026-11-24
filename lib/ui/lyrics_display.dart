@@ -9,7 +9,6 @@ import 'package:material_ui/material_ui.dart';
 
 import '../player/lyrics.dart';
 import '../player/playback.dart';
-import 'player_controls.dart';
 
 class SyncedLyrics extends StatefulWidget {
   const SyncedLyrics({
@@ -18,13 +17,11 @@ class SyncedLyrics extends StatefulWidget {
     required this.lines,
     this.textAlign = TextAlign.center,
     this.stage = false,
-    this.seekOnTap = true,
   });
   final Playback player;
   final List<LyricLine> lines;
   final TextAlign textAlign;
   final bool stage;
-  final bool seekOnTap;
 
   @override
   State<SyncedLyrics> createState() => _SyncedLyricsState();
@@ -212,17 +209,17 @@ class _SyncedLyricsState extends State<SyncedLyrics>
           SliverList.builder(
             itemCount: start,
             itemBuilder: (context, index) =>
-                _lyricRow(context, theme, start - index - 1, false),
+                _lyricRow(theme, start - index - 1, false),
           ),
           _CenteredLyricSliver(
             key: current,
             initialScrollOffset: _initialScrollOffset,
-            child: _lyricRow(context, theme, start, _active >= 0),
+            child: _lyricRow(theme, start, _active >= 0),
           ),
           SliverList.builder(
             itemCount: lines.length - start - 1,
             itemBuilder: (context, index) =>
-                _lyricRow(context, theme, start + index + 1, false),
+                _lyricRow(theme, start + index + 1, false),
           ),
           // 让最后一句也有足够空间停在视口中间。
           SliverToBoxAdapter(
@@ -254,7 +251,6 @@ class _SyncedLyricsState extends State<SyncedLyrics>
   }
 
   Widget _lyricRow(
-    BuildContext context,
     ThemeData theme,
     int index,
     bool active,
@@ -309,18 +305,10 @@ class _SyncedLyricsState extends State<SyncedLyrics>
     );
     if (!stage) return label;
     final key = _rowKeys.putIfAbsent(index, GlobalKey.new);
-    final row = SizedBox(width: double.infinity, child: label);
-    if (!widget.seekOnTap) return KeyedSubtree(key: key, child: row);
-    return InkWell(
+    return SizedBox(
       key: key,
-      borderRadius: BorderRadius.circular(8),
-      onTap: () => runPlayerAction(
-        context,
-        () => widget.player.seek(
-          line.start.isNegative ? Duration.zero : line.start,
-        ),
-      ),
-      child: row,
+      width: double.infinity,
+      child: label,
     );
   }
 }

@@ -1144,7 +1144,7 @@ void main() {
     expect(find.byTooltip('播放').hitTestable(), findsOneWidget);
   });
 
-  testWidgets('播放舞台歌词向上滚到中央，并支持点按歌词跳转', (tester) async {
+  testWidgets('播放舞台歌词向上滚到中央，点按歌词不跳转', (tester) async {
     const secondLine = '第二句歌词比较长所以会自动换行';
     final store = SessionStore(':memory:');
     final player = _LyricPlayback(store);
@@ -1182,8 +1182,9 @@ void main() {
     expect(tester.widget<Text>(third).style?.color, colors.onSurfaceVariant);
     expect(tester.getSize(second).height, greaterThan(tester.getSize(third).height * 2));
     await tester.tap(third);
-    expect(player.lastSeek, const Duration(seconds: 7));
-    player.setPosition(player.lastSeek!);
+    expect(player.lastSeek, isNull);
+    expect(player.position, const Duration(seconds: 3));
+    player.setPosition(const Duration(seconds: 7));
     await tester.pumpAndSettle();
     expect(tester.getCenter(third).dy, closeTo(tester.getCenter(lyrics).dy, 1));
     player.setPosition(Duration.zero);

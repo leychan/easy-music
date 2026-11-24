@@ -592,7 +592,6 @@ class _NowPlayingState extends State<_NowPlaying> {
               player: widget.player,
               lines: _lyrics,
               stage: true,
-              seekOnTap: !widget.showLyrics,
             ),
           ),
   );
