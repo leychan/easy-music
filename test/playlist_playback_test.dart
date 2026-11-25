@@ -112,6 +112,42 @@ void main() {
     expect(tester.widget<SongTile>(row(_second)).selected, isTrue);
   });
 
+  testWidgets('歌曲菜单追加到队尾，保留选曲并提示重复和不可播放的歌曲', (tester) async {
+    final store = SessionStore(':memory:');
+    final account = Account();
+    final player = _TestPlayer(store);
+    final library = _TestLibrary(account);
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    addTearDown(library.dispose);
+    final queued = Track.online('queued', 'https://example.org/queued.mp3');
+    await player.playTracks([queued]);
+    final initialPlayback = player.trackPlayback;
+    await tester.pumpWidget(MaterialApp(home: SongListPage(
+      title: '测试歌单', player: player, library: library,
+      loader: () async => [_first, _unavailable],
+    )));
+    await tester.pumpAndSettle();
+
+    Future<void> enqueue(Song song) async {
+      await tester.tap(button(song, '歌曲操作'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('添加到队列'));
+      await tester.pumpAndSettle();
+    }
+
+    await enqueue(_first);
+    expect(find.text('已添加到播放队列。'), findsOneWidget);
+    expect(player.trackPlayback, initialPlayback);
+    expect(find.byType(NowPlayingPage), findsNothing);
+    await enqueue(_first);
+    expect(find.text('这首歌已在播放队列中。'), findsOneWidget);
+    await enqueue(_unavailable);
+    expect(find.text('酷狗暂未返回可播放的地址，请稍后重试。'), findsOneWidget);
+    expect(library.requested, [_first.id, _unavailable.id]);
+    expect(player.tracks.value.map((track) => track.id), [queued.id, _first.id]);
+  });
+
   testWidgets('取不到地址留在歌单，播放全部从可播歌曲打开 Android 播放页', (tester) async {
     final (player, _) = await mount(tester, TargetPlatform.android, [_unavailable, _second]);
     await player.playTracks([Track.online('old', 'https://example.org/old.mp3')]);
@@ -707,6 +743,15 @@ class _TestLibrary extends MusicLibrary {
 /// 用同步的播放状态代替原生音频输出，保留歌单的实际点播逻辑。
 class _TestPlayer extends Playback {
   _TestPlayer(super.store);
+
+  @override
+  Future<bool> addTracks(List<Track> items) async {
+    final before = tracks.value;
+    final ids = before.map((track) => track.id).toSet();
+    final added = items.where((track) => ids.add(track.id)).toList();
+    tracks.value = [...before, ...added];
+    return added.isNotEmpty;
+  }
 
   @override
   Future<void> playTracks(List<Track> items) async {

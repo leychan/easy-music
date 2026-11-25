@@ -125,6 +125,12 @@ void main() {
     await player.playTracks([track('a')]);
     expect(player.mediaItem.value?.id, 'a');
     expect(player.queue.value.map((item) => item.id), order);
+
+    final playback = player.trackPlayback;
+    expect(await player.addTracks([track('tail')]), isTrue);
+    expect(await player.addTracks([track('tail')]), isFalse);
+    expect(player.trackPlayback, playback);
+    expect(store.read().tracks.map((item) => item.id), [...order, 'tail']);
   });
 
   test('随机播放时点播新歌，关闭随机后仍排在当时的曲目后面', () async {

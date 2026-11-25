@@ -767,6 +767,16 @@ class MusicLibrary extends ChangeNotifier {
     }
   }
 
+  /// 先确认音源可播，再追加到队尾。已在队列中的歌曲无需重新取地址。
+  Future<bool> addSongToQueue(Song song, Playback player) async {
+    if (player.tracks.value.any((track) => track.id == song.id)) return false;
+    final resolved = await resolve(song, quality: player.preferredQuality.value);
+    if (resolved == null || resolved.blocked) {
+      throw const KugouFailure('酷狗暂未返回可播放的地址，请稍后重试。');
+    }
+    return player.addTracks([resolved.track]);
+  }
+
   /// 播放单曲：先取地址，再交给播放器。
   Future<PlaybackOutcome> playSong(Song song, Playback player) async {
     try {

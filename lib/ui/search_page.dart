@@ -549,7 +549,7 @@ class _SearchPageState extends State<SearchPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           FavoriteButton(song: song, library: widget.library, compact: true),
-          SongMenu(song: song, library: widget.library, onDetails: open),
+          SongMenu(song: song, library: widget.library, player: widget.player, onDetails: open),
         ],
       ),
     );

@@ -1098,7 +1098,7 @@ class _SongListPageState extends State<SongListPage> {
                     onChanged: reloadFavorites ? _load : null,
                   ),
                 SongMenu(
-                  song: song, library: widget.library, onDetails: details,
+                  song: song, library: widget.library, player: widget.player, onDetails: details,
                   playlist: widget.playlist,
                   onChanged: widget.playlist != null || reloadFavorites ? _load : null,
                 ),

@@ -196,7 +196,8 @@ class Playback extends BaseAudioHandler {
     ),
   );
 
-  Future<void> addTracks(List<Track> added) =>
+  /// 追加到队尾，至少加入一首新歌时返回 true。
+  Future<bool> addTracks(List<Track> added) =>
       _commands.synchronized(() => _addTracks(added));
 
   Future<void> playTracks(List<Track> items) => _commands.synchronized(() async {
@@ -298,11 +299,11 @@ class Playback extends BaseAudioHandler {
     }
   }
 
-  Future<void> _addTracks(List<Track> items, {Track? after}) async {
+  Future<bool> _addTracks(List<Track> items, {Track? after}) async {
     final old = tracks.value;
     final ids = old.map((track) => track.id).toSet();
     final added = items.where((track) => ids.add(track.id)).toList();
-    if (added.isEmpty) return;
+    if (added.isEmpty) return false;
     // 只有本次点播的第一首是新歌时，才将它排到当前曲目后面。
     final anchor = added.first.id == items.first.id ? after : null;
     final slot = anchor == null ? old.length : old.indexOf(anchor) + 1;
@@ -335,6 +336,7 @@ class Playback extends BaseAudioHandler {
       _originalQueueOrder = previousOrder;
       rethrow;
     }
+    return true;
   }
 
   Future<bool> remove(Track track) => _commands.synchronized(() async {

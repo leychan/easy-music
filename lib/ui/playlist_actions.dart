@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../account/kugou/kugou_auth.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
+import '../player/playback.dart';
 import 'external_actions.dart';
 import 'music_toast.dart';
 
@@ -111,19 +112,21 @@ Future<void> _share(void Function(String) notify, String text) async {
   }
 }
 
-enum _SongAction { details, favorite, unfavorite, add, remove, share }
+enum _SongAction { details, queue, favorite, unfavorite, add, remove, share }
 
 class SongMenu extends StatelessWidget {
   const SongMenu({
     super.key,
     required this.song,
     required this.library,
+    required this.player,
     required this.onDetails,
     this.playlist,
     this.onChanged,
   });
   final Song song;
   final MusicLibrary library;
+  final Playback player;
   final VoidCallback onDetails;
   final Playlist? playlist;
   final VoidCallback? onChanged;
@@ -134,6 +137,9 @@ class SongMenu extends StatelessWidget {
       switch (action) {
         case _SongAction.details:
           onDetails();
+        case _SongAction.queue:
+          final added = await library.addSongToQueue(song, player);
+          notify(added ? '已添加到播放队列。' : '这首歌已在播放队列中。');
         case _SongAction.favorite:
         case _SongAction.unfavorite:
           await library.toggleFavorite(song, favorite: action == _SongAction.favorite);
@@ -191,6 +197,7 @@ class SongMenu extends StatelessWidget {
     onSelected: (action) => _handle(context, action),
     itemBuilder: (_) => [
       const PopupMenuItem(value: _SongAction.details, child: Text('歌曲详情')),
+      const PopupMenuItem(value: _SongAction.queue, child: Text('添加到队列')),
       PopupMenuItem(
         value: library.isFavorite(song) ? _SongAction.unfavorite : _SongAction.favorite,
         enabled: !library.favoriteBusy(song),
