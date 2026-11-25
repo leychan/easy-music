@@ -61,10 +61,30 @@ jobs:
           flutter pub get --enforce-lockfile
           flutter build linux --release --no-pub
           bash tool/package_linux_release.sh
+      - name: Build Debian and Arch Linux packages
+        if: github.ref_type == 'tag'
+        env:
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+        run: |
+          archive="build/release/easy-music-$APP_VERSION-linux-x86_64.tar.gz"
+          bash tool/package_debian_release.sh "$archive"
+
+          work_dir=$(mktemp -d)
+          trap 'rm -rf -- "$work_dir"' EXIT
+          cp -- "$archive" "$work_dir/"
+          python3 tool/prepare_aur_release.py "$archive" "$work_dir"
+          # 复用 AUR 的 PKGBUILD。打包只复制预编译文件，安装时仍会检查运行依赖。
+          docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp \
+            --volume "$work_dir:/package" --workdir /package archlinux:base-devel \
+            makepkg --nodeps --nosign
+          cp -- "$work_dir"/easy-music-bin-*.pkg.tar.zst build/release/
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: linux-x86_64
-          path: build/release/easy-music-*-linux-x86_64.tar.gz
+          path: |
+            build/release/easy-music-*-linux-x86_64.tar.gz
+            build/release/easy-music_*_amd64.deb
+            build/release/easy-music-bin-*-x86_64.pkg.tar.zst
           if-no-files-found: error
 
   android:
@@ -149,7 +169,7 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
-      - name: Publish Release with both verified builds
+      - name: Publish Release with all verified packages
         working-directory: release-assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -159,7 +179,15 @@ jobs:
         run: |
           linux_archive="easy-music-$APP_VERSION-linux-x86_64.tar.gz"
           android_apk="easy-music-$APP_VERSION-android-arm64.apk"
-          sha256sum "$linux_archive" "$android_apk" > SHA256SUMS
+          debian_package="easy-music_${APP_VERSION}_amd64.deb"
+          shopt -s nullglob
+          arch_packages=(easy-music-bin-"$APP_VERSION"-*-x86_64.pkg.tar.zst)
+          if (( ${#arch_packages[@]} != 1 )); then
+            echo "::error::Expected exactly one Arch Linux package for $APP_VERSION."
+            exit 1
+          fi
+          assets=("$linux_archive" "$android_apk" "$debian_package" "${arch_packages[0]}")
+          sha256sum "${assets[@]}" > SHA256SUMS
 
           if ! draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null); then
             gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --draft
@@ -168,13 +196,14 @@ jobs:
           # 重跑时保留已发布资产，避免改动已被 AUR 引用的压缩包。
           if [[ "$draft" == false ]]; then
             existing=$(mktemp -d)
-            gh release download "$GITHUB_REF_NAME" --dir "$existing" \
-              --pattern SHA256SUMS --pattern "$linux_archive" --pattern "$android_apk"
-            test -f "$existing/$linux_archive"
-            test -f "$existing/$android_apk"
-            (cd "$existing" && sha256sum --check SHA256SUMS)
+            patterns=(--pattern SHA256SUMS)
+            for asset in "${assets[@]}"; do
+              patterns+=(--pattern "$asset")
+            done
+            gh release download "$GITHUB_REF_NAME" --dir "$existing" "${patterns[@]}"
+            (cd "$existing" && sha256sum "${assets[@]}" | cmp - SHA256SUMS)
           else
-            gh release upload "$GITHUB_REF_NAME" --clobber "$linux_archive" "$android_apk" SHA256SUMS
+            gh release upload "$GITHUB_REF_NAME" --clobber "${assets[@]}" SHA256SUMS
             gh release edit "$GITHUB_REF_NAME" --draft=false
           fi
           if [[ "$REPOSITORY_PRIVATE" == true ]]; then

@@ -56,7 +56,7 @@ flutter build linux --release
 
 可执行文件位于 `build/linux/x64/release/bundle/`。运行或移动时，请将 `easy_music` 与同目录下的 `data/`、`lib/` 一起保留。
 
-Linux 发布压缩包可用 `bash tool/package_linux_release.sh` 生成，产物在 `build/release/`。Arch Linux 的包文件及验证步骤见 [AUR 打包说明](packaging/aur/README.md)。
+Linux 发布压缩包可用 `bash tool/package_linux_release.sh` 生成，产物在 `build/release/`。在 Ubuntu 24.04 上构建 Linux 发布版后，可用 `bash tool/package_debian_release.sh "$(bash tool/package_linux_release.sh)"` 生成 `.deb`。Arch Linux 的包文件及验证步骤见 [AUR 打包说明](packaging/aur/README.md)。
 
 Android Release 使用正式密钥签名。签名配置可以放在 `android/key.properties`，也可以放在 `~/.local/share/easy-music/signing/key.properties`。构建机可用 `EASY_MUSIC_ANDROID_KEY_PROPERTIES` 指定临时配置文件。配置需要 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`，相对的密钥路径以配置文件所在目录为基准。签名文件和密码应保存在本机或 CI 的 Secrets 中。
 
@@ -72,7 +72,7 @@ APK 位于 `build/app/outputs/flutter-apk/app-release.apk`。从同包名的旧�
 
 ### GitHub Actions
 
-推送分支后，Actions 会生成 Linux 发布压缩包和 Android ARM64 调试 APK，可以在该次运行的 Artifacts 中下载。推送与 `pubspec.yaml` 版本一致的稳定标签（例如 `v0.1.0`）后，会构建正式签名的 APK，并把它和 Linux 包、`SHA256SUMS` 一起发布到 GitHub Release。公开仓库的 Release 成功后，工作流会继续更新 AUR。
+推送分支后，Actions 会生成 Linux 发布压缩包和 Android ARM64 调试 APK，可以在该次运行的 Artifacts 中下载。推送与 `pubspec.yaml` 版本一致的稳定标签（例如 `v0.1.0`）后，GitHub Release 会提供正式签名的 Android ARM64 APK、Linux x86_64 压缩包、`.deb`、pacman 可安装的 `.pkg.tar.zst` 和 `SHA256SUMS`。`.deb` 可用 `sudo apt install ./文件名.deb` 安装，Arch 包可用 `sudo pacman -U ./文件名.pkg.tar.zst` 安装。公开仓库的 Release 成功后，工作流会继续更新 AUR。
 
 ## 手动验证
 
