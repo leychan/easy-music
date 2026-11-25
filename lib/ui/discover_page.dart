@@ -1087,7 +1087,7 @@ class _SongListPageState extends State<SongListPage> {
             loading: _pendingSongId == song.id,
             onTap: () => _play(song),
             onPlay: () => _play(song),
-            onPause: playing ? () => runPlayerAction(context, widget.player.pause) : null,
+            onPause: playing ? () => runPlayerAction(context, () => widget.player.pauseTrack(song.id)) : null,
             onLongPress: details,
             trailing: Row(
               mainAxisSize: MainAxisSize.min,

@@ -204,6 +204,40 @@ void main() {
     expect(requests, 2);
   });
 
+  test('FM 等待下一批时手动追加歌曲，下一首优先播队尾新歌', () async {
+    _NativePlayer();
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = Playback(store);
+    addTearDown(player.clearQueue);
+    final requested = Completer<void>();
+    final recommendations = Completer<List<Track>>();
+    await player.replaceTracks([track('fm1')], loadMore: () {
+      requested.complete();
+      return recommendations.future;
+    });
+    await requested.future.timeout(const Duration(seconds: 2));
+    await player.skipToNext();
+    await player.addTracks([track('manual')]);
+    final advanced = player.mediaItem.firstWhere((item) => item?.id == 'manual');
+    recommendations.complete([track('fm2')]);
+    await advanced.timeout(const Duration(seconds: 2));
+    expect(player.tracks.value.map((item) => item.id), ['fm1', 'manual', 'fm2']);
+  });
+
+  test('切歌命令先执行时，旧歌曲的列表暂停不会暂停当前歌曲', () async {
+    _NativePlayer();
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = Playback(store);
+    addTearDown(player.clearQueue);
+    await player.replaceTracks([track('first'), track('second')]);
+    await Future.wait([player.skipToNext(), player.pauseTrack('first')]);
+    expect(player.trackPlayback, (trackId: 'second', playing: true));
+    await player.pauseTrack('second');
+    expect(player.trackPlayback.playing, isFalse);
+  });
+
   test('播放从零淡入，暂停淡出后恢复设定音量', () async {
     final native = _NativePlayer();
     final store = SessionStore(':memory:');

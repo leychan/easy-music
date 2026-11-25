@@ -293,12 +293,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _play(Song song) async {
-    final player = widget.player;
-    if (player.canResumeTrack(song.id)) {
-      if (!player.trackPlayback.playing) await runPlayerAction(context, player.play);
-      return;
-    }
-    final outcome = await widget.library.playSong(song, widget.player);
+    final outcome = await widget.library.playSong(song, widget.player, resumeCurrent: true);
     if (!mounted) return;
     final notice = outcome.notice;
     if (notice != null) showMusicNotice(context, notice);
@@ -543,7 +538,9 @@ class _SearchPageState extends State<SearchPage> {
       index: index + 1,
       selected: selected,
       onPlay: () => _play(song),
-      onPause: selected && playback.playing ? () => runPlayerAction(context, widget.player.pause) : null,
+      onPause: selected && playback.playing
+          ? () => runPlayerAction(context, () => widget.player.pauseTrack(song.id))
+          : null,
       onLongPress: open,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

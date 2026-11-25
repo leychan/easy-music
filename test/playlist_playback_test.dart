@@ -304,7 +304,7 @@ void main() {
     expect(player.playbackState.value.queueIndex, 0);
   });
 
-  testWidgets('搜索结果点播后同步当前歌曲，暂停和恢复沿用已有音源', (tester) async {
+  testWidgets('搜索结果同步播放和切歌，暂停后继续播放仍需经过曲库授权', (tester) async {
     final store = SessionStore(':memory:');
     final account = Account();
     final player = _TestPlayer(store);
@@ -330,7 +330,17 @@ void main() {
     await tester.tap(button(_first, '播放'));
     await tester.pumpAndSettle();
     expect(button(_first, '暂停'), findsOneWidget);
-    expect(library.requested, [_first.id]);
+    expect(library.requested, [_first.id, _first.id]);
+
+    await tester.tap(button(_first, '暂停'));
+    await tester.pumpAndSettle();
+    final authorization = Completer<SongUrl?>();
+    library.firstRequest = authorization.future;
+    await tester.tap(button(_first, '播放'));
+    authorization.completeError(const KugouFailure('请先登录酷狗账号后再播放。'));
+    await tester.pumpAndSettle();
+    expect(find.text('请先登录酷狗账号后再播放。'), findsOneWidget);
+    expect(player.trackPlayback.playing, isFalse);
 
     // 播放器从列表外切歌时，当前行也应随之切换。
     await player.playTracks([Track.online(_second.id, _url.url)]);
@@ -754,7 +764,7 @@ class _TestPlayer extends Playback {
   }
 
   @override
-  Future<void> playTracks(List<Track> items) async {
+  Future<void> playTracks(List<Track> items, {bool resumeCurrent = false}) async {
     final existing = {for (final track in tracks.value) track.id: track};
     existing.addEntries(items.map((track) => MapEntry(track.id, track)));
     _publishTracks(existing.values.toList(), items.first.id);
@@ -786,4 +796,9 @@ class _TestPlayer extends Playback {
 
   @override
   Future<void> pause() async => playbackState.add(playbackState.value.copyWith(playing: false));
+
+  @override
+  Future<void> pauseTrack(String trackId) async {
+    if (trackPlayback.trackId == trackId) await pause();
+  }
 }

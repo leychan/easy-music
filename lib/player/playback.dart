@@ -200,13 +200,15 @@ class Playback extends BaseAudioHandler {
   Future<bool> addTracks(List<Track> added) =>
       _commands.synchronized(() => _addTracks(added));
 
-  Future<void> playTracks(List<Track> items) => _commands.synchronized(() async {
+  Future<void> playTracks(List<Track> items, {bool resumeCurrent = false}) => _commands.synchronized(() async {
     if (items.isEmpty) return;
     await _addTracks(items, after: tracks.value.elementAtOrNull(index));
     // 重复点播直接定位已有条目，队列和数据库共用同一个唯一 ID。
     final incoming = items.first;
     final slot = tracks.value.indexWhere((track) => track.id == incoming.id);
     final existing = tracks.value[slot];
+    // 曲库完成本次取址后才进入这里，并在命令锁内确认当前歌曲仍可续播。
+    final resume = resumeCurrent && canResumeTrack(incoming.id);
     if ((incoming.kugouHash != null || incoming.isCloud) &&
         (existing.source != incoming.source || existing.albumAudioId != incoming.albumAudioId)) {
       // 更新播放地址或专辑曲目编号时，保留已补齐的封面和歌词。
@@ -215,19 +217,24 @@ class Playback extends BaseAudioHandler {
         artUri: incoming.artUri ?? existing.artUri,
         lyrics: existing.lyrics,
       );
+      final startPosition = resume ? position : Duration.zero;
       await _changeQueue(updated, () async {
         await _fadeOut();
         await _player.stop();
         _selectedIndex = slot;
-        _savedPosition = Duration.zero;
-        await _setSources(updated, slot, Duration.zero);
+        _savedPosition = startPosition;
+        await _setSources(updated, slot, startPosition);
       });
       await _start();
     } else {
       if (existing.artUri == null && incoming.artUri != null) {
         _updateTrackDetails(existing.id, (item) => item.copyWith(artUri: incoming.artUri));
       }
-      await _playAt(slot);
+      if (resume) {
+        if (!_player.playing) await _start();
+      } else {
+        await _playAt(slot);
+      }
     }
   });
 
@@ -629,20 +636,22 @@ class Playback extends BaseAudioHandler {
       await _commands.synchronized(() async {
         if (!identical(_continuation, continuation)) return;
         final previousLength = tracks.value.length;
+        final current = index;
         final advanceFrom = continuation.advanceFrom;
-        final advance = advanceFrom != null && advanceFrom == tracks.value.elementAtOrNull(index)?.id;
+        final advance = advanceFrom != null && advanceFrom == tracks.value.elementAtOrNull(current)?.id;
         continuation.advanceFrom = null;
         final finished = _player.processingState == audio.ProcessingState.completed;
         await _addTracks(more);
         continuation.exhausted = tracks.value.length == previousLength;
-        if (!continuation.exhausted && index < previousLength &&
+        final next = current + 1;
+        if (index == current && next < tracks.value.length &&
             (advance || (_player.playing &&
                 (finished || _player.processingState == audio.ProcessingState.completed)))) {
-          // 如果推荐回来前已经播到末尾，从新加入的第一首接上。
+          // 等推荐时可能已手动入队，接当前曲目的下一首，避免跳过队尾新歌。
           if (advance) {
-            await _playAt(previousLength);
+            await _playAt(next);
           } else {
-            await _selectAndPlay(previousLength);
+            await _selectAndPlay(next);
           }
         }
       });
@@ -940,6 +949,11 @@ class Playback extends BaseAudioHandler {
 
   @override
   Future<void> pause() => _commands.synchronized(_pauseAndSave);
+
+  /// 切歌可能先一步拿到命令锁，列表按钮只暂停它对应的歌曲。
+  Future<void> pauseTrack(String trackId) => _commands.synchronized(() async {
+    if (tracks.value.elementAtOrNull(index)?.id == trackId) await _pauseAndSave();
+  });
 
   Future<void> _pauseAndSave() async {
     _continuation?.advanceFrom = null;

@@ -144,7 +144,7 @@ class MusicLibrary extends ChangeNotifier {
 
   Future<void> deleteCloudTrack(CloudTrack track) => _readyApi.deleteCloudTrack(track);
 
-  Future<PlaybackOutcome> playCloud(CloudTrack item, Playback player) async {
+  Future<PlaybackOutcome> playCloud(CloudTrack item, Playback player, {bool resumeCurrent = false}) async {
     try {
       final address = await _readyApi.cloudAddress(item);
       if (_account.session?.userid != item.userid) {
@@ -157,7 +157,7 @@ class MusicLibrary extends ChangeNotifier {
           artUri: _coverUri(item.song.albumImage),
           albumAudioId: item.song.albumAudioId, albumId: item.song.albumId,
         ),
-      ]);
+      ], resumeCurrent: resumeCurrent);
       return const PlaybackOutcome.started();
     } on KugouFailure catch (error) {
       return PlaybackOutcome.failed(error.message);
@@ -778,13 +778,13 @@ class MusicLibrary extends ChangeNotifier {
   }
 
   /// 播放单曲：先取地址，再交给播放器。
-  Future<PlaybackOutcome> playSong(Song song, Playback player) async {
+  Future<PlaybackOutcome> playSong(Song song, Playback player, {bool resumeCurrent = false}) async {
     try {
       final resolved = await resolve(song, quality: player.preferredQuality.value);
       if (resolved == null || resolved.blocked) {
         return const PlaybackOutcome.unavailable();
       }
-      await player.playTracks([resolved.track]);
+      await player.playTracks([resolved.track], resumeCurrent: resumeCurrent);
       return const PlaybackOutcome.started();
     } on KugouFailure catch (error) {
       return PlaybackOutcome.failed(error.message);

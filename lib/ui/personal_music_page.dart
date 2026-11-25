@@ -84,15 +84,9 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
   }
 
   Future<void> _play(Object item) async {
-    final player = widget.player;
-    final trackId = _trackId(item);
-    if (trackId != null && player.canResumeTrack(trackId)) {
-      if (!player.trackPlayback.playing) await runPlayerAction(context, player.play);
-      return;
-    }
     final outcome = switch (item) {
-      CloudTrack track => await widget.library.playCloud(track, widget.player),
-      Song song => await widget.library.playSong(song, widget.player),
+      CloudTrack track => await widget.library.playCloud(track, widget.player, resumeCurrent: true),
+      Song song => await widget.library.playSong(song, widget.player, resumeCurrent: true),
       _ => const PlaybackOutcome.unavailable(),
     };
     final message = outcome.notice;
@@ -239,7 +233,7 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
                         selected: trackId == playback.trackId,
                         onPlay: () => _play(item),
                         onPause: playback.playing && trackId == playback.trackId
-                            ? () => runPlayerAction(context, widget.player.pause)
+                            ? () => runPlayerAction(context, () => widget.player.pauseTrack(trackId))
                             : null,
                         trailing: item is CloudTrack && item.fileId != null
                             ? IconButton(
