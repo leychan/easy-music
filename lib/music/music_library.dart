@@ -51,7 +51,7 @@ class MusicLibrary extends ChangeNotifier {
 
   final _urlCache = <(String, AudioQuality), SongUrl>{};
   final _covers = <(bool, int), String>{};
-  final _pendingCovers = <(bool, int), Future<void>>{};
+  final _pendingCovers = <(bool, int), Future<Map<int, String>>>{};
   final _favoriteCommands = Lock();
   final _favoriteKeys = <String>{};
   final _favoriteRequests = <((int, String), String), Future<bool>>{};
@@ -538,14 +538,15 @@ class MusicLibrary extends ChangeNotifier {
   Future<List<Song>> completeCovers(List<Song> songs) async {
     final missing = songs.where((song) => song.coverUrl().isEmpty).toList();
     if (missing.isEmpty) return songs;
-    await _loadCovers({for (final song in missing) song.albumId}, album: true);
-    await _loadCovers({
+    final albums = await _loadCovers({for (final song in missing) song.albumId}, album: true);
+    final tracks = await _loadCovers({
       for (final song in missing)
-        if (_covers[(true, song.albumId)] == null) song.albumAudioId,
+        if (!albums.containsKey(song.albumId)) song.albumAudioId,
     });
+    if (albums.isEmpty && tracks.isEmpty) return songs;
     return [
       for (final song in songs)
-        if (_cachedCover(song.albumId, song.albumAudioId) case final cover?
+        if (albums[song.albumId] ?? tracks[song.albumAudioId] case final cover?
             when song.coverUrl().isEmpty)
           song.withCover(cover)
         else
@@ -554,26 +555,25 @@ class MusicLibrary extends ChangeNotifier {
   }
 
   Future<Uri?> trackCover(Track track) async {
-    if (_cachedCover(track.albumId, track.albumAudioId) == null) {
-      await _loadCovers({track.albumId}, album: true);
-      if (_covers[(true, track.albumId)] == null) {
-        await _loadCovers({track.albumAudioId});
-      }
-    }
-    return _coverUri(_cachedCover(track.albumId, track.albumAudioId) ?? '');
+    final cover = _cachedCover(track.albumId, track.albumAudioId) ??
+        (await _loadCovers({track.albumId}, album: true))[track.albumId] ??
+        (await _loadCovers({track.albumAudioId}))[track.albumAudioId];
+    return _coverUri(cover ?? '');
   }
 
   String? _cachedCover(int albumId, int albumAudioId) =>
       _covers[(true, albumId)] ?? _covers[(false, albumAudioId)];
 
-  Future<void> _loadCovers(Set<int> ids, {bool album = false}) async {
+  Future<Map<int, String>> _loadCovers(Set<int> ids, {bool album = false}) async {
+    // 保留本次列表查到的封面，长歌单中前几批可能在查询结束前被缓存淘汰。
+    final covers = <int, String>{for (final id in ids) id: ?_covers[(album, id)]};
     final source = api;
-    if (source == null) return;
-    final waiting = <Future<void>>{
+    if (source == null) return covers;
+    final waiting = <Future<Map<int, String>>>{
       for (final id in ids) ?_pendingCovers[(album, id)],
     };
     final missing = ids.where((id) => id > 0 &&
-      !_covers.containsKey((album, id)) && !_pendingCovers.containsKey((album, id)),
+      !covers.containsKey(id) && !_pendingCovers.containsKey((album, id)),
     ).toList();
     const batchSize = 50;
     for (var start = 0; start < missing.length; start += batchSize) {
@@ -584,10 +584,15 @@ class MusicLibrary extends ChangeNotifier {
       }
       waiting.add(request);
     }
-    await Future.wait(waiting);
+    for (final batch in await Future.wait(waiting)) {
+      for (final entry in batch.entries) {
+        if (ids.contains(entry.key)) covers[entry.key] = entry.value;
+      }
+    }
+    return covers;
   }
 
-  Future<void> _fetchCovers(KugouMusicApi source, List<int> batch, {required bool album}) async {
+  Future<Map<int, String>> _fetchCovers(KugouMusicApi source, List<int> batch, {required bool album}) async {
     try {
       final result = await (album ? source.albumCovers(batch) : source.songCovers(batch));
       for (final id in batch) {
@@ -596,8 +601,10 @@ class MusicLibrary extends ChangeNotifier {
       while (_covers.length > _cacheLimit) {
         _covers.remove(_covers.keys.first);
       }
+      return result;
     } on Exception {
       // 封面接口失败时保留歌曲列表，下次进入仍可重试。
+      return const {};
     } finally {
       for (final id in batch) {
         _pendingCovers.remove((album, id));

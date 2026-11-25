@@ -189,6 +189,61 @@ void main() {
     expect(DiscoverCache(store).readPlaylists(null)!.first.id, savedPlaylist.id);
   });
 
+  testWidgets('发现页横向快滑松手后滑得更远、停得更慢', (tester) async {
+    final store = SessionStore(':memory:');
+    final account = Account();
+    final player = _TestPlayer(store);
+    final library = _TestLibrary(account);
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    addTearDown(library.dispose);
+    library.daily = [
+      for (var index = 1; index <= 16; index++)
+        Song(hash: 'A$index', title: '推荐 $index', albumAudioId: index),
+    ];
+
+    const defaultKey = ValueKey('默认横向列表');
+    Future<({double distance, int frames})> coast(Key key, PointerDeviceKind device) async {
+      final carousel = find.byKey(key);
+      final scroller = find.descendant(of: carousel, matching: find.byType(Scrollable));
+      final position = tester.state<ScrollableState>(scroller).position;
+      position.jumpTo(0);
+      await tester.pump();
+      await tester.fling(carousel, const Offset(-120, 0), 800, deviceKind: device);
+      final releasedAt = position.pixels;
+      final frames = await tester.pumpAndSettle(const Duration(milliseconds: 16));
+      return (distance: position.pixels - releasedAt, frames: frames);
+    }
+
+    for (final (platform, device) in [
+      (TargetPlatform.android, PointerDeviceKind.touch),
+      (TargetPlatform.linux, PointerDeviceKind.mouse),
+    ]) {
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(platform: platform),
+        scrollBehavior: const MaterialScrollBehavior().copyWith(
+          dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
+        ),
+        home: Scaffold(body: Column(children: [
+          const SingleChildScrollView(
+            key: defaultKey, scrollDirection: Axis.horizontal,
+            child: SizedBox(width: 2000, height: 48),
+          ),
+          Expanded(child: DiscoverPage(
+            library: library, player: player, userid: null, desktop: platform == TargetPlatform.linux,
+          )),
+        ])),
+      ));
+      await tester.pumpAndSettle();
+
+      final baseline = await coast(defaultKey, device);
+      final adjusted = await coast(const PageStorageKey('每日推荐'), device);
+      expect(baseline.distance, greaterThan(0));
+      expect(adjusted.distance, greaterThan(baseline.distance * 1.35));
+      expect(adjusted.frames, greaterThan(baseline.frames * 1.20));
+    }
+  });
+
   testWidgets('每日推荐的全部播放替换队列并包含完整推荐列表', (tester) async {
     final store = SessionStore(':memory:');
     final account = Account();

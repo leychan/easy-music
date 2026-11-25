@@ -10,6 +10,8 @@ import 'package:easy_music/account/kugou/kugou_auth.dart';
 import 'package:easy_music/account/kugou/kugou_client.dart';
 import 'package:easy_music/account/kugou/kugou_device.dart';
 import 'package:easy_music/main.dart';
+import 'package:easy_music/music/music_library.dart';
+import 'package:easy_music/music/song.dart';
 import 'package:easy_music/player/audio_quality.dart';
 import 'package:easy_music/player/lyrics.dart';
 import 'package:easy_music/player/playback.dart';
@@ -431,6 +433,64 @@ void main() {
         (widget.image as NetworkImage).url == cover.replaceAll('{size}', '150')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Linux 长歌曲列表保留已查到的封面并补齐下一页', (tester) async {
+    final requestedAlbums = <int>[];
+    final client = KugouClient(KugouDevice.generate(), client: MockClient((request) async {
+      expectSync(request.url.path, '/kmr/v2/albums');
+      final ids = [
+        for (final row in jsonDecode(request.body)['data'] as List) row['album_id'] as int,
+      ];
+      requestedAlbums.addAll(ids);
+      return http.Response(jsonEncode({
+        'status': 1,
+        'data': [
+          for (final id in ids)
+            {'album_id': id, 'sizable_cover': 'https://example.org/{size}/$id.jpg'},
+        ],
+      }), 200);
+    }));
+    final account = Account(client: client);
+    final store = SessionStore(':memory:');
+    final library = MusicLibrary(account);
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    addTearDown(library.dispose);
+
+    // 超过全局封面缓存容量，第一批仍须留在本次列表里。
+    const firstPageSize = 401;
+    final songs = [
+      for (var id = 1; id <= firstPageSize + 1; id++)
+        Song(hash: 'A$id', title: '歌曲 $id', albumId: id),
+    ];
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(platform: TargetPlatform.linux),
+      home: SongListPage(
+        title: '长歌单', library: library, player: Playback(store),
+        loader: () async => songs.take(firstPageSize).toList(),
+        loadMore: () async => songs,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    void expectCover(int id) {
+      final row = find.ancestor(of: find.text('歌曲 $id'), matching: find.byType(ListTile));
+      final image = find.descendant(of: row, matching: find.byType(Image));
+      expect((tester.widget<Image>(image).image as NetworkImage).url, 'https://example.org/150/$id.jpg');
+    }
+
+    expectCover(1);
+    final scroll = tester.state<ScrollableState>(find.byType(Scrollable)).position;
+    scroll.jumpTo(scroll.maxScrollExtent);
+    await tester.pumpAndSettle();
+    scroll.jumpTo(scroll.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expectCover(firstPageSize + 1);
+    scroll.jumpTo(0);
+    await tester.pumpAndSettle();
+    expectCover(1);
+    expect(requestedAlbums, unorderedEquals(songs.map((song) => song.albumId)));
   });
 
   testWidgets('音乐云盘提示登录失效，重试成功后在右侧显示文件', (tester) async {

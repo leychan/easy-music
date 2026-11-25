@@ -440,7 +440,7 @@ class _DiscoverCarousel extends StatefulWidget {
 class _DiscoverCarouselState extends State<_DiscoverCarousel> {
   static const _peek = 18.0;
   static const _maxStackDepth = 3;
-  final _scroll = ScrollController();
+  final _scroll = _DiscoverScrollController();
 
   @override
   void dispose() {
@@ -480,7 +480,9 @@ class _DiscoverCarouselState extends State<_DiscoverCarousel> {
             child: SingleChildScrollView(
               key: widget.storageKey,
               controller: _scroll,
-              physics: widget.onScroll == null ? null : const AlwaysScrollableScrollPhysics(),
+              physics: _DiscoverScrollPhysics(
+                parent: widget.onScroll == null ? null : const AlwaysScrollableScrollPhysics(),
+              ),
               scrollDirection: Axis.horizontal,
               child: SizedBox(
                 width: contentWidth,
@@ -570,6 +572,59 @@ class _DiscoverCarouselState extends State<_DiscoverCarousel> {
     if (depth >= blend) return depth;
     final progress = depth / blend;
     return blend * progress * progress * (2 - progress);
+  }
+}
+
+class _DiscoverScrollPhysics extends ScrollPhysics {
+  const _DiscoverScrollPhysics({super.parent});
+
+  @override
+  _DiscoverScrollPhysics applyTo(ScrollPhysics? ancestor) =>
+      _DiscoverScrollPhysics(parent: buildParent(ancestor));
+
+  @override
+  Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) {
+    final simulation = super.createBallisticSimulation(position, velocity);
+    if (simulation is ClampingScrollSimulation) {
+      // 降低滑行摩擦，让横滑逐步减速，边界回弹仍由系统滚动物理处理。
+      return ClampingScrollSimulation(
+        position: simulation.position, velocity: simulation.velocity,
+        friction: simulation.friction * 0.8,
+        tolerance: simulation.tolerance,
+      );
+    }
+    return simulation;
+  }
+}
+
+class _DiscoverScrollController extends ScrollController {
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics, ScrollContext context, ScrollPosition? oldPosition,
+  ) => _DiscoverScrollPosition(
+    physics: physics,
+    context: context,
+    initialPixels: initialScrollOffset,
+    keepScrollOffset: keepScrollOffset,
+    oldPosition: oldPosition,
+    debugLabel: debugLabel,
+  );
+}
+
+class _DiscoverScrollPosition extends ScrollPositionWithSingleContext {
+  _DiscoverScrollPosition({
+    required super.physics,
+    required super.context,
+    super.initialPixels,
+    super.keepScrollOffset,
+    super.oldPosition,
+    super.debugLabel,
+  });
+
+  @override
+  void goBallistic(double velocity) {
+    // 只提高松手时的速度，分页或窗口缩放引起的惯性重算不再提速。
+    super.goBallistic(activity is DragScrollActivity && !outOfRange ? velocity * 1.20 : velocity);
   }
 }
 
@@ -796,11 +851,7 @@ class _SongListPageState extends State<SongListPage> {
         if (songs.isEmpty) _error = '这个列表里还没有歌曲。';
       });
       _prefetchAfterLayout();
-      // 先展示歌曲，网络慢时封面可以稍后到。
-      final completed = await widget.library.completeCovers(songs);
-      if (mounted && identical(_songs, songs) && !identical(completed, songs)) {
-        setState(() => _songs = completed);
-      }
+      unawaited(_completeSongCovers(songs, attempt));
     } on KugouFailure catch (error) {
       if (!mounted || attempt != _loadAttempt) return;
       setState(() {
@@ -813,6 +864,19 @@ class _SongListPageState extends State<SongListPage> {
         _loading = false;
         _error = '加载失败，请稍后重试。';
       });
+    }
+  }
+
+  Future<void> _completeSongCovers(List<Song> songs, int attempt) async {
+    // 先展示歌曲；封面只更新到发起查询时的那一版列表。
+    try {
+      final completed = await widget.library.completeCovers(songs);
+      if (mounted && attempt == _loadAttempt && identical(_songs, songs) &&
+          !identical(completed, songs)) {
+        setState(() => _songs = completed);
+      }
+    } on Exception {
+      // 单独的封面请求失败时继续显示歌曲。
     }
   }
 
@@ -846,12 +910,25 @@ class _SongListPageState extends State<SongListPage> {
     try {
       final songs = await load();
       if (!mounted || attempt != _loadAttempt) return;
+      // 分页返回完整列表，旧条目可能仍用未补图的快照。
+      final covers = {
+        for (final song in _songs)
+          if (song.coverUrl().isNotEmpty) song.id: song.albumImage,
+      };
+      final updated = [
+        for (final song in songs)
+          if (covers[song.id] case final cover? when song.coverUrl().isEmpty)
+            song.withCover(cover)
+          else
+            song,
+      ];
       setState(() {
-        _hasMore = songs.length > _songs.length;
-        _songs = songs;
+        _hasMore = updated.length > _songs.length;
+        _songs = updated;
         _loadingMore = false;
       });
       if (_hasMore) _prefetchAfterLayout();
+      unawaited(_completeSongCovers(updated, attempt));
     } catch (_) {
       if (!mounted || attempt != _loadAttempt) return;
       setState(() {
