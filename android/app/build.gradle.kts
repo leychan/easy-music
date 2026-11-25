@@ -48,6 +48,27 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 原生视频插件提供多套库，APK 只保留与 Flutter 引擎目标架构对应的库。
+        val targetAbis = providers.gradleProperty("target-platform").orNull
+            ?.split(",")
+            ?.mapNotNull { platform ->
+                when (platform) {
+                    "android-arm" -> "armeabi-v7a"
+                    "android-arm64" -> "arm64-v8a"
+                    "android-x64" -> "x86_64"
+                    else -> null
+                }
+            }
+        if (!targetAbis.isNullOrEmpty() &&
+            !providers.gradleProperty("split-per-abi").orNull.toBoolean() &&
+            !providers.gradleProperty("disable-abi-filtering").orNull.toBoolean()
+        ) {
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(targetAbis)
+            }
+        }
     }
 
     signingConfigs {

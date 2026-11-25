@@ -8,6 +8,7 @@ import '../account/kugou/kugou_client.dart';
 import '../account/kugou/signature.dart';
 import '../player/audio_quality.dart';
 import '../player/lyrics.dart';
+import 'catalog.dart';
 import 'song.dart';
 
 export '../player/audio_quality.dart';
@@ -74,7 +75,25 @@ class KugouMusicApi {
     int page = 1,
     int pageSize = 30,
   }) async {
-    final json = await client.get(
+    final json = await _searchSongResponse(keyword, page, pageSize);
+    return parseCatalogSearch(json['data'], Song.tryParse, page: page, pageSize: pageSize).hits;
+  }
+
+  Future<CatalogSearchResult<List<Song>>> searchSongsPage(
+    String keyword, {
+    required int page,
+    required int pageSize,
+  }) async {
+    final json = await _searchSongResponse(keyword, page, pageSize);
+    final code = json['error_code'];
+    if (json['status']?.toString() == '0' || (code != null && code.toString() != '0')) {
+      throw const KugouFailure('搜索歌曲失败，请稍后重试。');
+    }
+    return parseCatalogSearch(json['data'], Song.tryParse, page: page, pageSize: pageSize);
+  }
+
+  Future<Map<String, dynamic>> _searchSongResponse(String keyword, int page, int pageSize) =>
+    client.get(
       Uri.parse('$_gateway/v2/search/song'),
       extraParams: {
         'keyword': keyword,
@@ -88,12 +107,6 @@ class KugouMusicApi {
       },
       headers: _searchHeaders,
     );
-    final data = json['data'];
-    if (data is! Map) return const [];
-    final lists = data['lists'];
-    if (lists is! List) return const [];
-    return lists.map(Song.tryParse).whereType<Song>().toList();
-  }
 
   /// 歌单只给编号时，批量查询缺少的专辑封面。
   Future<Map<int, String>> songCovers(Iterable<int> ids) async {

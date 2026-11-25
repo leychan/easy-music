@@ -371,7 +371,14 @@ class KugouClient {
     Object? decoded;
     var parsed = false;
     try {
-      decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      var body = utf8.decode(response.bodyBytes).trim();
+      // 综合搜索有时会在 JSON 外加上酷狗的响应标记。
+      const start = '<!--KG_TAG_RES_START-->';
+      const end = '<!--KG_TAG_RES_END-->';
+      if (body.startsWith(start) && body.endsWith(end)) {
+        body = body.substring(start.length, body.length - end.length);
+      }
+      decoded = jsonDecode(body);
       parsed = decoded is Map<String, dynamic>;
     } on FormatException {
       parsed = false;

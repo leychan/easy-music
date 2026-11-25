@@ -3,11 +3,12 @@ import 'package:material_ui/material_ui.dart';
 import '../account/kugou/kugou_auth.dart';
 import '../music/catalog.dart';
 import '../music/music_library.dart';
+import '../music/song.dart';
 import '../player/playback.dart';
 import 'cover.dart';
 import 'discover_page.dart';
-import 'external_actions.dart';
 import 'music_toast.dart';
+import 'mv_player_page.dart';
 import 'workspace_page.dart';
 
 Future<void> openCatalogHit(
@@ -46,6 +47,7 @@ Future<void> openCatalogHit(
         player: player,
         playlist: hit.playlist,
       ),
+      SearchType.video => MvPlayerPage(hit: hit, library: library, player: player),
       _ => _CatalogDetail(hit: hit, library: library, player: player),
     },
   ),
@@ -69,17 +71,11 @@ class _CatalogDetail extends StatefulWidget {
 class _CatalogDetailState extends State<_CatalogDetail> {
   bool _busy = false;
 
-  Future<void> _play() async {
+  Future<void> _play(Song song) async {
     setState(() => _busy = true);
     try {
-      final song = widget.hit.song;
-      if (song != null) {
-        final outcome = await widget.library.playSong(song, widget.player);
-        if (outcome.notice case final notice?) _notice(notice);
-      } else {
-        final url = await widget.library.videoAddress(widget.hit.id);
-        if (mounted) await openWebAddress(url);
-      }
+      final outcome = await widget.library.playSong(song, widget.player);
+      if (outcome.notice case final notice?) _notice(notice);
     } on KugouFailure catch (error) {
       _notice(error.message);
     } catch (_) {
@@ -98,7 +94,7 @@ class _CatalogDetailState extends State<_CatalogDetail> {
     final hit = widget.hit;
     final song = hit.song;
     return WorkspacePage(
-      title: Text(song == null ? 'MV' : '歌曲详情'),
+      title: Text(song == null ? '详情' : '歌曲详情'),
       body: SafeArea(
         child: ListView(
           padding: DesktopPageScope.bodyPadding(context, const EdgeInsets.all(24)),
@@ -119,14 +115,16 @@ class _CatalogDetailState extends State<_CatalogDetail> {
               Text(hit.subtitle, textAlign: TextAlign.center),
             if (song != null && song.albumName.isNotEmpty)
               Text(song.albumName, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            Center(
-              child: FilledButton.icon(
-                onPressed: _busy ? null : _play,
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: Text(_busy ? '加载中…' : (song == null ? '播放 MV' : '播放歌曲')),
+            if (song != null) ...[
+              const SizedBox(height: 16),
+              Center(
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : () => _play(song),
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: Text(_busy ? '加载中…' : '播放歌曲'),
+                ),
               ),
-            ),
+            ],
             if (hit.description.isNotEmpty) ...[
               const SizedBox(height: 20),
               SelectableText(hit.description),

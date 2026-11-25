@@ -13,6 +13,24 @@ enum SearchType {
   final String label;
 }
 
+typedef CatalogSearchResult<T> = ({T hits, bool hasMore});
+
+CatalogSearchResult<List<T>> parseCatalogSearch<T>(
+  Object? data,
+  T? Function(Map<String, dynamic>) parse, {
+  required int page,
+  required int pageSize,
+}) {
+  final rows = data is Map ? data['lists'] : data;
+  if (rows is! List || rows.isEmpty) return (hits: <T>[], hasMore: false);
+  final total = data is Map ? int.tryParse('${data['total']}') : null;
+  return (
+    hits: rows.whereType<Map<String, dynamic>>().map(parse).whereType<T>().toList(),
+    // 用原始结果数判断翻页，避免跳过不可解析的条目后提前结束。
+    hasMore: total != null ? page * pageSize < total : rows.length >= pageSize,
+  );
+}
+
 class CatalogHit {
   const CatalogHit({
     required this.id,

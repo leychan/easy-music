@@ -125,6 +125,73 @@ void main() {
     expect(requests.last.headers['kg-tid'], '255');
   });
 
+  test('综合搜索解析带标记的分类结果，并使用分组总数判断下一页', () async {
+    final client = KugouClient(
+      KugouDevice(guid: 'catalog-test', mac: '02:00:00:00:00:00'),
+      client: MockClient((request) async {
+        expect(request.url.host, 'complexsearch.kugou.com');
+        expect(request.url.path, '/v6/search/complex');
+        final params = request.url.queryParameters;
+        expect(params['keyword'], '示例');
+        expect(params['page'], '2');
+        expect(params['pagesize'], '30');
+        expect(params['cursor'], '0');
+        expect(params['signature'], hasLength(32));
+        final payload = jsonEncode({
+          'status': 1,
+          'data': {
+            'lists': [
+              {
+                'type': 'song', 'total': 61,
+                'lists': [{'FileHash': 'ABC', 'SongName': '示例歌曲', 'Audioid': 17}],
+              },
+              {
+                'type': 'collect', 'total': 31,
+                'lists': [{'gid': '2:3', 'specialname': '示例歌单'}],
+              },
+              {'type': 'talent', 'total': 70, 'lists': [{'id': 1}]},
+            ],
+          },
+        });
+        return http.Response.bytes(
+          utf8.encode('<!--KG_TAG_RES_START-->$payload<!--KG_TAG_RES_END-->\n'),
+          200,
+        );
+      }),
+    );
+    addTearDown(client.close);
+
+    final result = await KugouMusicApi(client).searchComplex('示例', page: 2);
+    expect(result.hits.keys, [SearchType.song, SearchType.playlist]);
+    expect(result.hits[SearchType.song]!.single.song!.albumAudioId, 17);
+    expect(result.hits[SearchType.playlist]!.single.title, '示例歌单');
+    expect(result.hasMore, isTrue);
+  });
+
+  test('单项搜索将页码传给歌曲和专辑接口，末页停止翻页', () async {
+    final api = apiFor((request) {
+      expect(request.url.queryParameters['page'], '2');
+      return {
+        'status': 1,
+        'data': {
+          'total': 31,
+          'lists': [
+            if (request.url.path == '/v2/search/song')
+              {'FileHash': 'ABC', 'SongName': '示例歌曲', 'Audioid': 17}
+            else
+              {'albumid': 17, 'albumname': '示例专辑'},
+          ],
+        },
+      };
+    });
+    for (final type in [SearchType.song, SearchType.album]) {
+      final result = await api.searchCatalogPage('示例', type, page: 2);
+      expect(result.hits, hasLength(1));
+      expect(result.hasMore, isFalse);
+    }
+    expect(requests.map((request) => request.url.path), ['/v2/search/song', '/v1/search/album']);
+  });
+
   test('增删歌单歌曲分别使用专辑音频 ID 与歌单文件 ID', () async {
     final api = apiFor((_) => {'status': 1});
     api.client.session = const KugouSession(

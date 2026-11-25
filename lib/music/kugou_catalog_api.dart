@@ -19,12 +19,25 @@ extension KugouCatalogApi on KugouMusicApi {
     if (type == SearchType.song) {
       return (await searchSongs(keyword)).map(CatalogHit.track).toList();
     }
+    return (await searchCatalogPage(keyword, type, page: 1)).hits;
+  }
+
+  Future<CatalogSearchResult<List<CatalogHit>>> searchCatalogPage(
+    String keyword,
+    SearchType type, {
+    required int page,
+  }) async {
+    const pageSize = 30;
+    if (type == SearchType.song) {
+      final result = await searchSongsPage(keyword, page: page, pageSize: pageSize);
+      return (hits: result.hits.map(CatalogHit.track).toList(), hasMore: result.hasMore);
+    }
     final json = await client.get(
       Uri.parse('$_gateway/v1/search/${type.apiName}'),
       extraParams: {
         'keyword': keyword,
-        'page': 1,
-        'pagesize': 30,
+        'page': page,
+        'pagesize': pageSize,
         'platform': 'AndroidFilter',
         'iscorrection': 1,
         if (type == SearchType.album) ...{
@@ -39,10 +52,48 @@ extension KugouCatalogApi on KugouMusicApi {
       headers: {'x-router': 'complexsearch.kugou.com'},
     );
     final data = _catalogData(json, '搜索${type.label}');
-    return _catalogRows(data, 'lists')
-        .map((row) => CatalogHit.fromJson(type, row))
-        .whereType<CatalogHit>()
-        .toList();
+    return parseCatalogSearch(data, (row) => CatalogHit.fromJson(type, row), page: page, pageSize: pageSize);
+  }
+
+  Future<CatalogSearchResult<Map<SearchType, List<CatalogHit>>>> searchComplex(
+    String keyword, {
+    required int page,
+  }) async {
+    const pageSize = 30;
+    final json = await client.get(
+      Uri.parse('https://complexsearch.kugou.com/v6/search/complex'),
+      extraParams: {
+        'keyword': keyword,
+        'platform': 'AndroidFilter',
+        'page': page,
+        'pagesize': pageSize,
+        'cursor': 0,
+      },
+    );
+    final data = _catalogData(json, '综合搜索');
+    if (data is! Map || data['lists'] is! List) {
+      throw const KugouFailure('酷狗未返回可识别的综合搜索结果。');
+    }
+    final hits = <SearchType, List<CatalogHit>>{};
+    var hasMore = false;
+    for (final group in _catalogRows(data, 'lists')) {
+      final type = switch (group['type']) {
+        'song' => SearchType.song,
+        'author' => SearchType.artist,
+        'album' => SearchType.album,
+        'collect' => SearchType.playlist,
+        'lyric' => SearchType.lyric,
+        'mv' => SearchType.video,
+        _ => null,
+      };
+      if (type == null) continue;
+      final result = parseCatalogSearch(
+        group, (row) => CatalogHit.fromJson(type, row), page: page, pageSize: pageSize,
+      );
+      if (result.hits.isNotEmpty) hits.putIfAbsent(type, () => []).addAll(result.hits);
+      hasMore |= result.hasMore;
+    }
+    return (hits: hits, hasMore: hasMore);
   }
 
   Future<List<Song>> albumTracks(String id, {bool purchased = false}) async {

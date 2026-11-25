@@ -45,6 +45,56 @@ class WorkspaceHeading extends StatelessWidget {
   );
 }
 
+/// 发现和搜索共用的曲库分组标题，播放和查看全部的按钮保持同一排列。
+class MusicSectionHeader extends StatelessWidget {
+  const MusicSectionHeader({
+    super.key,
+    required this.title,
+    this.onPlayAll,
+    this.onViewAll,
+    this.playAllBusy = false,
+    this.viewAllTooltip = '查看全部',
+  });
+
+  final String title;
+  final VoidCallback? onPlayAll;
+  final VoidCallback? onViewAll;
+  final bool playAllBusy;
+  final String viewAllTooltip;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        if (onPlayAll != null)
+          IconButton(
+            tooltip: playAllBusy ? '准备播放…' : '全部播放',
+            onPressed: playAllBusy ? null : onPlayAll,
+            icon: playAllBusy
+                ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.play_circle_outline_rounded),
+          ),
+        if (onViewAll != null)
+          IconButton(
+            tooltip: viewAllTooltip,
+            onPressed: onViewAll,
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+      ],
+    ),
+  );
+}
+
 /// 工作区内沿用外层面板和侧栏导航，独立打开时使用普通页面布局。
 class WorkspacePage extends StatelessWidget {
   const WorkspacePage({super.key, required this.title, required this.body, this.actions = const []});

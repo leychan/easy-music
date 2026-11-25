@@ -291,25 +291,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      _SectionHeader(
+      MusicSectionHeader(
         title: title,
-        trailing: songs.isEmpty
+        onPlayAll: songs.isEmpty
             ? null
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: '全部播放',
-                    onPressed: () => _playAll(songs, privateFm: privateFm),
-                    icon: const Icon(Icons.play_circle_outline_rounded),
-                  ),
-                  IconButton(
-                    tooltip: '查看全部',
-                    onPressed: () => _openFeed(title, songs, privateFm: privateFm),
-                    icon: const Icon(Icons.chevron_right_rounded),
-                  ),
-                ],
-              ),
+            : () => _playAll(songs, privateFm: privateFm),
+        onViewAll: songs.isEmpty ? null : () => _openFeed(title, songs, privateFm: privateFm),
       ),
       if (songs.isEmpty)
         _sectionNotice(loading: loading, error: error, emptyText: emptyText, onRetry: onRetry)
@@ -342,17 +329,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
   Widget _recommendedSection(BuildContext context, List<Playlist> playlists) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      _SectionHeader(
+      MusicSectionHeader(
         title: '推荐歌单',
-        trailing: IconButton(
-          tooltip: '查看全部',
-          onPressed: () => Navigator.of(context).push<void>(MaterialPageRoute(
-            builder: (_) => RecommendedPlaylistsPage(
-              library: widget.library, player: widget.player,
-            ),
-          )),
-          icon: const Icon(Icons.chevron_right_rounded),
-        ),
+        onViewAll: () => Navigator.of(context).push<void>(MaterialPageRoute(
+          builder: (_) => RecommendedPlaylistsPage(
+            library: widget.library, player: widget.player,
+          ),
+        )),
       ),
       if (playlists.isEmpty)
         _sectionNotice(
@@ -1187,29 +1170,6 @@ class _RecommendedPlaylistsPageState extends State<RecommendedPlaylistsPage> {
           ),
         ],
       ),
-    ),
-  );
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, this.trailing});
-
-  final String title;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 28),
-          ),
-        ),
-        ?trailing,
-      ],
     ),
   );
 }

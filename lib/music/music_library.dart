@@ -96,12 +96,33 @@ class MusicLibrary extends ChangeNotifier {
   Future<List<String>> suggest(String keyword) async =>
       await api?.searchSuggest(keyword) ?? const [];
 
-  Future<List<CatalogHit>> searchCatalog(String keyword, SearchType type) async {
-    if (type == SearchType.song) {
-      return (await completeCovers(await search(keyword))).map(CatalogHit.track).toList();
-    }
-    return await api?.searchCatalog(keyword, type) ?? const [];
+  Future<CatalogSearchResult<List<CatalogHit>>> searchCatalogPage(
+    String keyword,
+    SearchType type, {
+    required int page,
+  }) async {
+    final result = await api?.searchCatalogPage(keyword, type, page: page);
+    if (result == null) return (hits: const <CatalogHit>[], hasMore: false);
+    if (type != SearchType.song) return result;
+    return (hits: await _completeSearchCovers(result.hits), hasMore: result.hasMore);
   }
+
+  Future<CatalogSearchResult<Map<SearchType, List<CatalogHit>>>> searchComplex(
+    String keyword, {
+    required int page,
+  }) async {
+    final result = await _readyApi.searchComplex(keyword, page: page);
+    final songs = result.hits[SearchType.song];
+    if (songs == null) return result;
+    return (
+      hits: {...result.hits, SearchType.song: await _completeSearchCovers(songs)},
+      hasMore: result.hasMore,
+    );
+  }
+
+  Future<List<CatalogHit>> _completeSearchCovers(List<CatalogHit> hits) async =>
+      (await completeCovers(hits.map((hit) => hit.song).whereType<Song>().toList()))
+          .map(CatalogHit.track).toList();
 
   Future<List<Song>> artistTracks(String id) async =>
       await api?.artistTracks(id) ?? const [];

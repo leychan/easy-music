@@ -430,14 +430,14 @@ class _PlaybackSeekBarState extends State<PlaybackSeekBar> {
       builder: (context, snapshot) {
         final position = snapshot.data ?? Duration.zero;
         final value = _dragPosition ?? position.inMilliseconds.toDouble();
-        final elapsed = _formatTime(Duration(milliseconds: value.round()));
+        final elapsed = formatPlaybackTime(Duration(milliseconds: value.round()));
         final slider = Slider(
           value: value.clamp(0, maximum),
           max: maximum == 0 ? 1 : maximum,
           label: widget.stage ? elapsed : null,
           semanticFormatterCallback: widget.stage
               ? (value) =>
-                    '播放进度 ${_formatTime(Duration(milliseconds: value.round()))}'
+                    '播放进度 ${formatPlaybackTime(Duration(milliseconds: value.round()))}'
               : null,
           onChanged: maximum == 0
               ? null
@@ -465,7 +465,7 @@ class _PlaybackSeekBarState extends State<PlaybackSeekBar> {
                 children: [
                   Text(elapsed, style: timeStyle),
                   Text(
-                    maximum == 0 ? '--:--' : '−${_formatTime(remaining)}',
+                    maximum == 0 ? '--:--' : '−${formatPlaybackTime(remaining)}',
                     style: timeStyle,
                   ),
                 ],
@@ -478,7 +478,7 @@ class _PlaybackSeekBarState extends State<PlaybackSeekBar> {
             Text(elapsed, style: labelStyle),
             Expanded(child: slider),
             Text(
-              duration == null ? '--:--' : _formatTime(duration),
+              duration == null ? '--:--' : formatPlaybackTime(duration),
               style: labelStyle,
             ),
           ],
@@ -486,13 +486,13 @@ class _PlaybackSeekBarState extends State<PlaybackSeekBar> {
       },
     );
   }
+}
 
-  String _formatTime(Duration time) {
-    String pad(int value) => value.toString().padLeft(2, '0');
-    final seconds = pad(time.inSeconds.remainder(60));
-    if (time.inHours == 0) return '${pad(time.inMinutes)}:$seconds';
-    return '${time.inHours}:${pad(time.inMinutes.remainder(60))}:$seconds';
-  }
+String formatPlaybackTime(Duration time) {
+  String pad(int value) => value.toString().padLeft(2, '0');
+  final seconds = pad(time.inSeconds.remainder(60));
+  if (time.inHours == 0) return '${pad(time.inMinutes)}:$seconds';
+  return '${time.inHours}:${pad(time.inMinutes.remainder(60))}:$seconds';
 }
 
 class _StageSlider extends StatelessWidget {
