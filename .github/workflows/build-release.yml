@@ -87,7 +87,8 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
       - name: Install the Flutter 3.50 Android NDK
-        run: sdkmanager 'ndk;28.2.13676358'
+        # GitHub 的 Ubuntu 镜像预装了此工具，但其目录可能未加入 PATH。
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"'
       - run: flutter pub get --enforce-lockfile
       - name: Build Android ARM64 debug APK
         if: github.ref_type != 'tag'
