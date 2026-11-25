@@ -104,6 +104,49 @@ void main() {
     await player.clearQueue();
   });
 
+  test('点播新歌后插到当前曲目下一位，已有歌曲沿用原位置', () async {
+    _NativePlayer();
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = Playback(store);
+    addTearDown(player.clearQueue);
+    await player.addTracks(['a', 'b', 'c', 'd'].map(track).toList());
+    await player.skipToQueueItem(1);
+
+    await player.playTracks([track('new')]);
+
+    final order = ['a', 'b', 'new', 'c', 'd'];
+    expect(player.queue.value.map((item) => item.id), order);
+    expect(player.mediaItem.value?.id, 'new');
+    expect(store.read().tracks.map((item) => item.id), order);
+    expect(store.read().index, 2);
+    await player.skipToNext();
+    expect(player.mediaItem.value?.id, 'c');
+    await player.playTracks([track('a')]);
+    expect(player.mediaItem.value?.id, 'a');
+    expect(player.queue.value.map((item) => item.id), order);
+  });
+
+  test('随机播放时点播新歌，关闭随机后仍排在当时的曲目后面', () async {
+    _NativePlayer();
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = Playback(store);
+    addTearDown(player.clearQueue);
+    await player.addTracks(['a', 'b', 'c'].map(track).toList());
+    await player.skipToQueueItem(1);
+    await player.setShuffleMode(AudioServiceShuffleMode.all);
+    final order = player.queue.value.map((item) => item.id).toList()..insert(1, 'new');
+
+    await player.playTracks([track('new')]);
+
+    expect(player.queue.value.map((item) => item.id), order);
+    expect(player.mediaItem.value?.id, 'new');
+    await player.setShuffleMode(AudioServiceShuffleMode.none);
+    expect(player.queue.value.map((item) => item.id), ['a', 'b', 'new', 'c']);
+    expect(player.mediaItem.value?.id, 'new');
+  });
+
   test('FM 播完前一批后接上下一首，清空后丢弃在途推荐', () async {
     final native = _NativePlayer();
     final store = SessionStore(':memory:');

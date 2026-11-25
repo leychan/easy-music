@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 
-import 'package:audio_service/audio_service.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../account/kugou/kugou_auth.dart';
@@ -941,16 +940,13 @@ class _SongListPageState extends State<SongListPage> {
 
   Future<void> _play(Song song) async {
     if (_startingPlayback) return;
-    final state = widget.player.playbackState.value;
-    final current = _currentSongId(state) == song.id;
-    if (current && state.playing) {
+    final playback = widget.player.trackPlayback;
+    if (playback.trackId == song.id && playback.playing) {
       await _openNowPlaying();
       return;
     }
     // 队列里已经暂停的歌曲从原进度继续，首次点播才重新取地址。
-    final resume = current && state.processingState != AudioProcessingState.idle &&
-        state.processingState != AudioProcessingState.completed &&
-        state.processingState != AudioProcessingState.error;
+    final resume = widget.player.canResumeTrack(song.id);
     await _startPlayback(
       resume ? _resumeCurrent : () => widget.library.playSong(song, widget.player),
       songId: song.id,
@@ -1000,11 +996,6 @@ class _SongListPageState extends State<SongListPage> {
     await showNowPlaying(context, player: widget.player, library: widget.library);
   }
 
-  String? _currentSongId(PlaybackState state) {
-    final index = state.queueIndex;
-    return index == null ? null : widget.player.tracks.value.elementAtOrNull(index)?.id;
-  }
-
   @override
   Widget build(BuildContext context) {
     return WorkspacePage(
@@ -1033,23 +1024,22 @@ class _SongListPageState extends State<SongListPage> {
       ],
       body: SafeArea(
         top: false,
-        child: StreamBuilder<PlaybackState>(
-          stream: widget.player.playbackState,
-          initialData: widget.player.playbackState.value,
+        child: StreamBuilder<TrackPlayback>(
+          stream: widget.player.trackPlaybackStream,
+          initialData: widget.player.trackPlayback,
           builder: (context, snapshot) => _buildBody(snapshot.requireData),
         ),
       ),
     );
   }
 
-  Widget _buildBody(PlaybackState state) {
+  Widget _buildBody(TrackPlayback playback) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error case final error?) {
       return _ErrorView(message: error, onRetry: _load);
     }
     final hasHeader = widget.cover.isNotEmpty || widget.description.isNotEmpty;
     final hasFooter = _loadingMore || _moreFailed;
-    final currentId = _currentSongId(state);
     // 收藏列表里的红心变化会改变列表内容，需要重新读取。
     final reloadFavorites = widget.reloadOnFavoriteChange || widget.playlist?.isDefault == true;
     return Scrollbar(
@@ -1085,8 +1075,8 @@ class _SongListPageState extends State<SongListPage> {
             );
           }
           final song = _songs[slot];
-          final selected = song.id == currentId;
-          final playing = selected && state.playing;
+          final selected = song.id == playback.trackId;
+          final playing = selected && playback.playing;
           void details() => openCatalogHit(
             context, CatalogHit.track(song), SearchType.song, widget.library, widget.player,
           );

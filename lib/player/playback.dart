@@ -14,6 +14,8 @@ import 'track.dart';
 
 enum SleepAction { pause, exit }
 
+typedef TrackPlayback = ({String? trackId, bool playing});
+
 class QueuePreparation {
   const QueuePreparation(this.preview);
 
@@ -44,6 +46,7 @@ class Playback extends BaseAudioHandler {
   final message = ValueNotifier<String?>(null);
 
   static const _toggleFavoriteAction = 'dev.easymusic.easy_music.TOGGLE_FAVORITE';
+  static const _previousAction = 'dev.easymusic.easy_music.PREVIOUS';
   static const _exitAction = 'dev.easymusic.easy_music.EXIT';
   MediaItem? _publishedItem;
   bool _updatingQueue = false;
@@ -77,6 +80,24 @@ class Playback extends BaseAudioHandler {
       _store.readListeningStats();
   bool get hasNext => _neighborIndex(1) != null || _continuation?.exhausted == false;
   bool get hasPrevious => _neighborIndex(-1) != null;
+
+  TrackPlayback get trackPlayback => _trackPlayback(playbackState.value);
+
+  // 歌曲列表只关心当前曲目和播放状态，进度更新无需重绘列表。
+  late final Stream<TrackPlayback> trackPlaybackStream = playbackState.map(_trackPlayback).distinct();
+
+  TrackPlayback _trackPlayback(PlaybackState state) {
+    final slot = state.queueIndex;
+    return (trackId: slot == null ? null : tracks.value.elementAtOrNull(slot)?.id, playing: state.playing);
+  }
+
+  bool canResumeTrack(String trackId) {
+    final state = playbackState.value;
+    return _trackPlayback(state).trackId == trackId && switch (state.processingState) {
+      AudioProcessingState.idle || AudioProcessingState.completed || AudioProcessingState.error => false,
+      _ => true,
+    };
+  }
 
   AudioServiceRepeatMode get _repeatMode => switch (_player.loopMode) {
     audio.LoopMode.off => AudioServiceRepeatMode.none,
@@ -176,11 +197,11 @@ class Playback extends BaseAudioHandler {
   );
 
   Future<void> addTracks(List<Track> added) =>
-      _commands.synchronized(() => _appendTracks(added));
+      _commands.synchronized(() => _addTracks(added));
 
   Future<void> playTracks(List<Track> items) => _commands.synchronized(() async {
     if (items.isEmpty) return;
-    await _appendTracks(items);
+    await _addTracks(items, after: tracks.value.elementAtOrNull(index));
     // 重复点播直接定位已有条目，队列和数据库共用同一个唯一 ID。
     final incoming = items.first;
     final slot = tracks.value.indexWhere((track) => track.id == incoming.id);
@@ -277,26 +298,37 @@ class Playback extends BaseAudioHandler {
     }
   }
 
-  Future<void> _appendTracks(List<Track> items) async {
+  Future<void> _addTracks(List<Track> items, {Track? after}) async {
     final old = tracks.value;
     final ids = old.map((track) => track.id).toSet();
     final added = items.where((track) => ids.add(track.id)).toList();
     if (added.isEmpty) return;
+    // 只有本次点播的第一首是新歌时，才将它排到当前曲目后面。
+    final anchor = added.first.id == items.first.id ? after : null;
+    final slot = anchor == null ? old.length : old.indexOf(anchor) + 1;
     final previousOrder = _originalQueueOrder;
     if (previousOrder != null) {
-      _originalQueueOrder = [...previousOrder, ...added.map((track) => track.id)];
+      final restoredOrder = [...previousOrder, ...added.map((track) => track.id)];
+      final anchorSlot = anchor == null ? -1 : previousOrder.indexOf(anchor.id);
+      if (anchorSlot >= 0) {
+        restoredOrder.insert(anchorSlot + 1, restoredOrder.removeAt(previousOrder.length));
+      }
+      _originalQueueOrder = restoredOrder;
       final rest = added.sublist(1)..shuffle();
       added.replaceRange(1, added.length, rest);
     }
+    final updated = [...old, ...added];
+    if (slot < old.length) updated.insert(slot, updated.removeAt(old.length));
     try {
-      await _changeQueue([...old, ...added], () async {
+      await _changeQueue(updated, () async {
         if (old.isEmpty) {
           await _setSources(added, 0, Duration.zero);
         } else {
-          // 逐首追加，避免 Linux 后端批量追加时发出越界的移动指令。
+          // Linux 后端直接插入可能移动到越界索引，逐首追加后再移动点播曲目。
           for (final track in added) {
             await _player.addAudioSource(_audioSource(track));
           }
+          if (slot < old.length) await _player.moveAudioSource(old.length, slot);
         }
       });
     } catch (_) {
@@ -491,6 +523,10 @@ class Playback extends BaseAudioHandler {
 
   @override
   Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
+    if (name == _previousAction) {
+      await skipToPrevious();
+      return null;
+    }
     if (name == _exitAction) {
       final exit = onExit;
       if (exit != null) {
@@ -595,7 +631,7 @@ class Playback extends BaseAudioHandler {
         final advance = advanceFrom != null && advanceFrom == tracks.value.elementAtOrNull(index)?.id;
         continuation.advanceFrom = null;
         final finished = _player.processingState == audio.ProcessingState.completed;
-        await _appendTracks(more);
+        await _addTracks(more);
         continuation.exhausted = tracks.value.length == previousLength;
         if (!continuation.exhausted && index < previousLength &&
             (advance || (_player.playing &&

@@ -27,6 +27,7 @@ class DesktopWorkspace extends StatefulWidget {
     required this.player,
     required this.section,
     required this.discover,
+    required this.search,
     required this.content,
     required this.queue,
     required this.sidebarActions,
@@ -39,6 +40,7 @@ class DesktopWorkspace extends StatefulWidget {
   final Playback player;
   final AppSection section;
   final Widget discover;
+  final Widget? search;
   final Widget? content;
   final Widget queue;
   final List<Widget> sidebarActions;
@@ -114,7 +116,13 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
 
   void _selectSearch() {
     _selectSection(AppSection.search);
-    _searchFocus.requestFocus();
+    // 等搜索页可见后再聚焦，隐藏时输入框不会接收键盘事件。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.section == AppSection.search && _sidebarPage == null) {
+        _searchFocus.requestFocus();
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _returnToSelectedPage() {
@@ -158,7 +166,7 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
         observers: [_contentObserver],
         pages: [
           MaterialPage<void>(
-            // 保留发现页和滚动位置，侧栏切换时只隐藏它。
+            // 侧栏切换时保留发现和搜索，搜索栏与结果一起隐藏。
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -167,19 +175,21 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                   maintainState: true,
                   child: widget.discover,
                 ),
-                if (widget.content case final content?)
-                  // 右侧打开详情时，搜索栏和搜索结果一起隐藏。
-                  widget.section == AppSection.search
-                      ? WorkspacePage(
-                          title: const Text('搜索音乐'),
-                          body: Column(
-                            children: [
-                              Builder(builder: _searchBar),
-                              Expanded(child: content),
-                            ],
-                          ),
-                        )
-                      : content,
+                if (widget.search case final search?)
+                  Visibility(
+                    visible: widget.section == AppSection.search,
+                    maintainState: true,
+                    child: WorkspacePage(
+                      title: const Text('搜索音乐'),
+                      body: Column(
+                        children: [
+                          Builder(builder: _searchBar),
+                          Expanded(child: search),
+                        ],
+                      ),
+                    ),
+                  ),
+                ?widget.content,
               ],
             ),
           ),

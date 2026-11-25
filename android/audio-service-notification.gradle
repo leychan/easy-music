@@ -23,6 +23,8 @@ abstract class GeneratePlaybackNotificationAudioService extends DefaultTask {
     public interface PlaybackNotificationFactory {
         Notification buildPlaybackNotification(NotificationCompat.Builder builder,
                 MediaControllerCompat controller, PendingIntent openIntent, boolean playing);
+        void configurePlaybackStateActions(PlaybackStateCompat.Builder builder, long actions,
+                List<PlaybackStateCompat.CustomAction> customActions);
     }
 
     // 恢复上次队列时显示同一张通知，首次播放再把它提升为前台服务通知。
@@ -38,6 +40,28 @@ abstract class GeneratePlaybackNotificationAudioService extends DefaultTask {
             return ((PlaybackNotificationFactory) getApplication()).buildPlaybackNotification(
                     builder, mediaSession.getController(),
                     config.androidNotificationClickStartsActivity ? contentIntent : null, playing);
+        }''')
+
+        replaceOnce('''        PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
+                .setActions(AUTO_ENABLED_ACTIONS | actionBits)
+                .setState(getPlaybackState(), position, speed, updateTime)
+                .setBufferedPosition(bufferedPosition);
+
+        for (PlaybackStateCompat.CustomAction action : this.customActions) {
+            stateBuilder.addCustomAction(action);
+        }''', '''        long supportedActions = AUTO_ENABLED_ACTIONS | actionBits;
+        PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
+                .setActions(supportedActions)
+                .setState(getPlaybackState(), position, speed, updateTime)
+                .setBufferedPosition(bufferedPosition);
+
+        if (getApplication() instanceof PlaybackNotificationFactory) {
+            ((PlaybackNotificationFactory) getApplication()).configurePlaybackStateActions(
+                    stateBuilder, supportedActions, this.customActions);
+        } else {
+            for (PlaybackStateCompat.CustomAction action : this.customActions) {
+                stateBuilder.addCustomAction(action);
+            }
         }''')
 
         replaceOnce('''    private void updateNotification() {

@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.support.v4.media.session.MediaControllerCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import com.ryanheise.audioservice.AudioService
 
@@ -23,4 +24,10 @@ class EasyMusicApplication : Application(), AudioService.PlaybackNotificationFac
         openIntent: PendingIntent?,
         playing: Boolean,
     ): Notification = playbackNotification.build(builder, controller, openIntent, playing)
+
+    override fun configurePlaybackStateActions(
+        builder: PlaybackStateCompat.Builder,
+        actions: Long,
+        customActions: List<PlaybackStateCompat.CustomAction>,
+    ) = playbackNotification.configurePlaybackStateActions(builder, actions, customActions)
 }

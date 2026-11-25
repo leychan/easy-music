@@ -268,6 +268,42 @@ void main() {
     expect(player.playbackState.value.queueIndex, 0);
   });
 
+  testWidgets('搜索结果点播后同步当前歌曲，暂停和恢复沿用已有音源', (tester) async {
+    final store = SessionStore(':memory:');
+    final account = Account();
+    final player = _TestPlayer(store);
+    final library = _TestLibrary(account)..complexResults = {
+      1: {SearchType.song: [_first, _second].map(CatalogHit.track).toList()},
+    };
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SearchPage(library: library, player: player))));
+    await tester.enterText(find.byType(TextField), '测试');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    await tester.tap(button(_first, '播放'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<SongTile>(row(_first)).selected, isTrue);
+    expect(button(_first, '暂停'), findsOneWidget);
+    await tester.tap(button(_first, '暂停'));
+    await tester.pumpAndSettle();
+    expect(player.trackPlayback.playing, isFalse);
+    expect(tester.widget<SongTile>(row(_first)).selected, isTrue);
+    await tester.tap(button(_first, '播放'));
+    await tester.pumpAndSettle();
+    expect(button(_first, '暂停'), findsOneWidget);
+    expect(library.requested, [_first.id]);
+
+    // 播放器从列表外切歌时，当前行也应随之切换。
+    await player.playTracks([Track.online(_second.id, _url.url)]);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SongTile>(row(_first)).selected, isFalse);
+    expect(tester.widget<SongTile>(row(_second)).selected, isTrue);
+    expect(button(_second, '暂停'), findsOneWidget);
+  });
+
   testWidgets('综合和分类搜索滚动追加结果，全部播放包含已加载歌曲并去重', (tester) async {
     tester.view
       ..physicalSize = const Size(380, 480)

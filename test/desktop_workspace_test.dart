@@ -30,6 +30,7 @@ import 'package:easy_music/ui/my_page.dart';
 import 'package:easy_music/ui/now_playing.dart';
 import 'package:easy_music/ui/player_controls.dart';
 import 'package:easy_music/ui/player_page.dart';
+import 'package:easy_music/ui/search_page.dart';
 import 'package:easy_music/ui/workspace_page.dart';
 import 'package:flutter/rendering.dart' show OffsetLayer;
 import 'package:flutter/services.dart';
@@ -812,6 +813,58 @@ void main() {
     expect(find.descendant(of: find.byType(SongListPage), matching: find.byType(FavoriteButton)), findsNothing);
   });
 
+  for (final platform in [TargetPlatform.android, TargetPlatform.linux]) {
+    testWidgets('${platform.name} 切换标签保留搜索内容、分类和滚动位置', (tester) async {
+      final desktop = platform == TargetPlatform.linux;
+      final requests = <Uri>[];
+      const songRoute = '/v2/search/song';
+      await mount(
+        tester, platform, desktop ? const Size(1280, 760) : const Size(390, 760),
+        requests: requests,
+        respond: (request) => request.url.path != songRoute ? null : {
+          'status': 1,
+          'data': {'lists': [
+            for (var index = 1; index <= 20; index++)
+              {'SongName': '搜索结果 $index', 'FileHash': 'ABC$index', 'Audioid': index, 'Image': cover},
+          ]},
+        },
+      );
+      Finder tab(String label) => desktop
+          ? (label == '我的' ? find.text(label) : find.byTooltip(label))
+          : find.widgetWithText(NavigationDestination, label);
+      final page = find.byType(SearchPage);
+      final input = desktop ? desktopSearch : find.descendant(of: page, matching: find.byType(TextField));
+      final songFilter = find.widgetWithText(ChoiceChip, '歌曲');
+      final results = find.descendant(of: page, matching: find.byType(CustomScrollView));
+      await tester.tap(tab('搜索'));
+      await tester.pumpAndSettle();
+      await tester.tap(songFilter);
+      await tester.pumpAndSettle();
+      await tester.enterText(input, '晴天');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(find.text('搜索结果 1'), findsOneWidget);
+      final scroll = tester.widget<CustomScrollView>(results).controller!;
+      scroll.jumpTo(440);
+      await tester.pumpAndSettle();
+      expect(scroll.offset, 440);
+      expect(requests.where((url) => url.path == songRoute), hasLength(1));
+
+      for (final label in ['发现', '我的', if (!desktop) '队列']) {
+        await tester.tap(tab(label));
+        await tester.pumpAndSettle();
+        expect(page, findsNothing);
+        await tester.tap(tab('搜索'));
+        await tester.pumpAndSettle();
+        expect(tester.widget<TextField>(input).controller?.text, '晴天');
+        expect(tester.widget<ChoiceChip>(songFilter).selected, isTrue);
+        expect(tester.widget<CustomScrollView>(results).controller, same(scroll));
+        expect(scroll.offset, 440);
+        expect(requests.where((url) => url.path == songRoute), hasLength(1));
+      }
+    });
+  }
+
   testWidgets('Linux 返回发现不刷新，手动刷新只更新每日推荐', (tester) async {
     final requests = <Uri>[];
     const fmRoute = '/v2/personal_recommend';
@@ -857,7 +910,9 @@ void main() {
     expect(find.text('外观'), findsOneWidget);
     await tester.tap(find.byTooltip('发现'));
     await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect([calls(fmRoute), calls(dailyRoute), calls(playlistsRoute)], [1, 1, 1]);

@@ -14,6 +14,7 @@ import 'favorite_button.dart';
 import 'catalog_pages.dart';
 import 'music_toast.dart';
 import 'playlist_actions.dart';
+import 'player_controls.dart' show runPlayerAction;
 import 'song_tile.dart';
 import 'workspace_page.dart';
 
@@ -292,6 +293,11 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _play(Song song) async {
+    final player = widget.player;
+    if (player.canResumeTrack(song.id)) {
+      if (!player.trackPlayback.playing) await runPlayerAction(context, player.play);
+      return;
+    }
     final outcome = await widget.library.playSong(song, widget.player);
     if (!mounted) return;
     final notice = outcome.notice;
@@ -406,12 +412,16 @@ class _SearchPageState extends State<SearchPage> {
         else if (_resultGroups.isEmpty && !_hasMore)
           Expanded(child: _EmptySearchHint(onPick: _search))
         else
-          Expanded(child: _buildResults(context)),
+          Expanded(child: StreamBuilder<TrackPlayback>(
+            stream: widget.player.trackPlaybackStream,
+            initialData: widget.player.trackPlayback,
+            builder: (context, snapshot) => _buildResults(context, snapshot.requireData),
+          )),
       ],
     );
   }
 
-  Widget _buildResults(BuildContext context) {
+  Widget _buildResults(BuildContext context, TrackPlayback playback) {
     final overview = _type == null;
     // 歌词搜索可能命中同一首歌，按首次出现的顺序入队。
     final seen = <String>{};
@@ -466,7 +476,7 @@ class _SearchPageState extends State<SearchPage> {
           ),
         SliverList.builder(
           itemCount: truncated ? limit : hits.length,
-          itemBuilder: (context, index) => _resultTile(context, type, hits[index], index),
+          itemBuilder: (context, index) => _resultTile(context, type, hits[index], index, playback),
         ),
       ]);
     }
@@ -508,7 +518,7 @@ class _SearchPageState extends State<SearchPage> {
     ),
   );
 
-  Widget _resultTile(BuildContext context, SearchType type, CatalogHit hit, int index) {
+  Widget _resultTile(BuildContext context, SearchType type, CatalogHit hit, int index, TrackPlayback playback) {
     final song = hit.song;
     void open() => openCatalogHit(
       context, hit, type, widget.library, widget.player,
@@ -527,11 +537,13 @@ class _SearchPageState extends State<SearchPage> {
         onTap: open,
       );
     }
+    final selected = song.id == playback.trackId;
     return SongTile(
       song: song,
       index: index + 1,
-      onTap: () => _play(song),
+      selected: selected,
       onPlay: () => _play(song),
+      onPause: selected && playback.playing ? () => runPlayerAction(context, widget.player.pause) : null,
       onLongPress: open,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

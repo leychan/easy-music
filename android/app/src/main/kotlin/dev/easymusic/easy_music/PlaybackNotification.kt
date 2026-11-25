@@ -7,20 +7,47 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 
 private const val EXTRA_MEDIA_SESSION = "dev.easymusic.easy_music.MEDIA_SESSION"
 private const val FAVORITE_ACTION = "dev.easymusic.easy_music.TOGGLE_FAVORITE"
+private const val PREVIOUS_ACTION = "dev.easymusic.easy_music.PREVIOUS"
 private const val EXIT_ACTION = "dev.easymusic.easy_music.EXIT"
 private const val TRACK_ID = "trackId"
 
 /** 由播放服务发布，首次播放、暂停和切歌都使用同一张通知。 */
 internal class PlaybackNotification(private val context: Context) {
+    fun configurePlaybackStateActions(
+        builder: PlaybackStateCompat.Builder,
+        actions: Long,
+        customActions: List<PlaybackStateCompat.CustomAction>,
+    ) {
+        val favorite = customActions.firstOrNull { it.action == FAVORITE_ACTION }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && favorite != null) {
+            // Android 13 起，系统用第一个自定义操作填补空出的「上一首」位置。
+            // 有收藏按钮时让它占用这个位置，并把「上一首」保留在展开的卡片里。
+            builder.setActions(actions and PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS.inv())
+                .addCustomAction(favorite)
+            if (actions and PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS != 0L) {
+                builder.addCustomAction(
+                    PREVIOUS_ACTION,
+                    context.getString(R.string.playback_notification_previous),
+                    R.drawable.ic_notification_previous,
+                )
+            }
+            customActions.filter { it.action != FAVORITE_ACTION }.forEach { builder.addCustomAction(it) }
+        } else {
+            customActions.forEach { builder.addCustomAction(it) }
+        }
+    }
+
     fun build(
         builder: NotificationCompat.Builder,
         controller: MediaControllerCompat,
@@ -50,6 +77,20 @@ internal class PlaybackNotification(private val context: Context) {
             builder.setLargeIcon(cover)
         }
 
+        val trackId = item.description.mediaId
+        val favorite = state?.customActions?.firstOrNull {
+            it.action == FAVORITE_ACTION && it.extras?.getString(TRACK_ID) == trackId
+        }
+        val hasFavorite = trackId != null && favorite != null
+        if (trackId != null && favorite != null) {
+            val liked = favorite.icon == R.drawable.ic_notification_liked
+            builder.addAction(
+                if (liked) R.drawable.ic_notification_liked else R.drawable.ic_notification_like,
+                context.getString(if (liked) R.string.playback_notification_unlike else R.string.playback_notification_like),
+                action(token, FAVORITE_ACTION, trackId),
+            )
+        }
+
         builder.addAction(
             R.drawable.ic_notification_previous,
             context.getString(R.string.playback_notification_previous),
@@ -68,27 +109,17 @@ internal class PlaybackNotification(private val context: Context) {
                 action(token, "next"),
             )
 
-        val trackId = item.description.mediaId
-        val favorite = state?.customActions?.firstOrNull {
-            it.action == FAVORITE_ACTION && it.extras?.getString(TRACK_ID) == trackId
-        }
-        if (trackId != null && favorite != null) {
-            val liked = favorite.icon == R.drawable.ic_notification_liked
-            builder.addAction(
-                if (liked) R.drawable.ic_notification_liked else R.drawable.ic_notification_like,
-                context.getString(if (liked) R.string.playback_notification_unlike else R.string.playback_notification_like),
-                action(token, FAVORITE_ACTION, trackId),
-            )
-        }
         builder.addAction(
             R.drawable.ic_notification_close,
             context.getString(R.string.playback_notification_exit),
             action(token, EXIT_ACTION),
         )
 
-        // 绑定现有会话，由系统绘制媒体卡片。折叠时优先显示三个播放按钮。
-        return builder.setStyle(MediaStyle().setMediaSession(token).setShowActionsInCompactView(0, 1, 2))
-            .build()
+        // 旧版 Android 的折叠卡片只能显示三个按钮，有收藏时保留播放和下一首。
+        val style = MediaStyle().setMediaSession(token)
+        if (hasFavorite) style.setShowActionsInCompactView(0, 2, 3)
+        else style.setShowActionsInCompactView(0, 1, 2)
+        return builder.setStyle(style).build()
     }
 
     private fun action(token: MediaSessionCompat.Token, action: String, trackId: String? = null): PendingIntent {

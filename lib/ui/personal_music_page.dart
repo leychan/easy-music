@@ -10,6 +10,7 @@ import 'catalog_pages.dart';
 import 'cover.dart';
 import 'discover_page.dart';
 import 'music_toast.dart';
+import 'player_controls.dart' show runPlayerAction;
 import 'song_tile.dart';
 import 'workspace_page.dart';
 
@@ -83,6 +84,12 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
   }
 
   Future<void> _play(Object item) async {
+    final player = widget.player;
+    final trackId = _trackId(item);
+    if (trackId != null && player.canResumeTrack(trackId)) {
+      if (!player.trackPlayback.playing) await runPlayerAction(context, player.play);
+      return;
+    }
     final outcome = switch (item) {
       CloudTrack track => await widget.library.playCloud(track, widget.player),
       Song song => await widget.library.playSong(song, widget.player),
@@ -91,6 +98,13 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
     final message = outcome.notice;
     if (mounted && message != null) showMusicNotice(context, message);
   }
+
+  // 云盘里同名的文件用云盘队列 ID 匹配，和曲库里的歌曲分开。
+  String? _trackId(Object item) => switch (item) {
+    CloudTrack track => track.id,
+    Song song => song.id,
+    _ => null,
+  };
 
   Future<void> _upload() async {
     if (_uploading) return;
@@ -152,7 +166,13 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
   }
 
   @override
-  Widget build(BuildContext context) => WorkspacePage(
+  Widget build(BuildContext context) => StreamBuilder<TrackPlayback>(
+    stream: widget.player.trackPlaybackStream,
+    initialData: widget.player.trackPlayback,
+    builder: (context, snapshot) => _buildPage(context, snapshot.requireData),
+  );
+
+  Widget _buildPage(BuildContext context, TrackPlayback playback) => WorkspacePage(
     title: Text(widget.cloud ? '音乐云盘' : '已购音乐'),
     actions: [
       if (widget.cloud)
@@ -213,10 +233,14 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
                           ),
                         ),
                       )
-                    else
+                    else if (_trackId(item) case final trackId?)
                       SongTile(
                         song: item is CloudTrack ? item.song : item as Song,
+                        selected: trackId == playback.trackId,
                         onPlay: () => _play(item),
+                        onPause: playback.playing && trackId == playback.trackId
+                            ? () => runPlayerAction(context, widget.player.pause)
+                            : null,
                         trailing: item is CloudTrack && item.fileId != null
                             ? IconButton(
                                 tooltip: '移除云盘文件',

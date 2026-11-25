@@ -52,6 +52,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   final _discoverScroll = PageStorageBucket();
   final _section = ValueNotifier(AppSection.discover);
   final _desktopSearch = ValueNotifier<DesktopSearchRequest?>(null);
+  bool _searchOpened = false;
   bool _pickingFile = false;
   bool _checkedPlaybackNotifications = false;
   bool _mini = false;
@@ -373,13 +374,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           discover: _buildSection(
             AppSection.discover, desktop: true, active: section == AppSection.discover,
           ),
-          content: section == AppSection.discover ? null : _buildSection(section, desktop: true),
+          search: _searchOpened ? _buildSection(AppSection.search, desktop: true) : null,
+          content: section == AppSection.mine ? _buildSection(section, desktop: true) : null,
           queue: _queuePanel(),
           sidebarActions: [_addMusicMenu(), if (Platform.isLinux) _desktopMenu()],
-          onSelect: (section) => _section.value = section,
+          onSelect: _selectSection,
           onSearch: (keyword) {
             _desktopSearch.value = (keyword: keyword, revision: (_desktopSearch.value?.revision ?? 0) + 1);
-            _section.value = AppSection.search;
+            _selectSection(AppSection.search);
           },
         ),
       );
@@ -462,12 +464,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     onAddLink: _addLink,
   );
 
+  void _selectSection(AppSection section) {
+    if (section == AppSection.search) _searchOpened = true;
+    _section.value = section;
+  }
+
   Widget _buildBody(Widget playerBar) => ValueListenableBuilder(
     valueListenable: _section,
     builder: (context, section, _) => LayoutBuilder(
       builder: (context, constraints) {
         Widget discover(bool active) => _buildSection(AppSection.discover, active: active);
-        final content = section == AppSection.discover ? null : _buildSection(section);
+        final search = _searchOpened ? _buildSection(AppSection.search) : null;
+        final content = section == AppSection.mine ? _buildSection(section) : null;
         // 宽屏：左侧队列常驻，右侧内容区切页。
         if (constraints.maxWidth - MediaQuery.paddingOf(context).horizontal >= 980) {
           return Scaffold(
@@ -487,10 +495,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                               children: [
                                 _SectionBar(
                                   value: _section,
-                                  onChanged: (value) => _section.value = value,
+                                  onChanged: _selectSection,
                                   inline: true,
                                 ),
-                                Expanded(child: _MobileSection(discover: discover, content: content)),
+                                Expanded(child: _MobileSection(
+                                  section: section, discover: discover, search: search, content: content,
+                                )),
                               ],
                             ),
                           ),
@@ -506,9 +516,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         // 窄屏：底部导航切换队列与各内容页。
         return _QueueAwareScaffold(
           section: section,
-          onChanged: (value) => _section.value = value,
+          onChanged: _selectSection,
           queue: _queuePanel(),
           discover: discover,
+          search: search,
           content: content,
           playerBar: playerBar,
         );
@@ -548,18 +559,28 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   };
 }
 
-/// 切换标签时保留发现页的数据和滚动位置，其他页面按需构建。
+/// 切换标签时保留发现和搜索的内容与滚动位置。
 class _MobileSection extends StatelessWidget {
-  const _MobileSection({required this.discover, required this.content});
+  const _MobileSection({
+    required this.section, required this.discover, required this.search, required this.content,
+  });
 
+  final AppSection? section;
   final Widget Function(bool active) discover;
+  final Widget? search;
   final Widget? content;
 
   @override
   Widget build(BuildContext context) => Stack(
     fit: StackFit.expand,
     children: [
-      Visibility(visible: content == null, maintainState: true, child: discover(content == null)),
+      Visibility(
+        visible: section == AppSection.discover,
+        maintainState: true,
+        child: discover(section == AppSection.discover),
+      ),
+      if (search case final page?)
+        Visibility(visible: section == AppSection.search, maintainState: true, child: page),
       ?content,
     ],
   );
@@ -572,6 +593,7 @@ class _QueueAwareScaffold extends StatefulWidget {
     required this.onChanged,
     required this.queue,
     required this.discover,
+    required this.search,
     required this.content,
     required this.playerBar,
   });
@@ -580,6 +602,7 @@ class _QueueAwareScaffold extends StatefulWidget {
   final ValueChanged<AppSection> onChanged;
   final Widget queue;
   final Widget Function(bool active) discover;
+  final Widget? search;
   final Widget? content;
   final Widget playerBar;
 
@@ -596,7 +619,9 @@ class _QueueAwareScaffoldState extends State<_QueueAwareScaffold> {
     body: SafeArea(
       bottom: false,
       child: _MobileSection(
+        section: _showQueue ? null : widget.section,
         discover: widget.discover,
+        search: widget.search,
         content: _showQueue ? widget.queue : widget.content,
       ),
     ),
