@@ -156,9 +156,11 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   bool _onFmScroll(ScrollNotification notification) {
+    // 从左边缘弹回来也会产生正向位移，忽略这段回弹，避免误触发预取。
     if (_loadingFm || _loadingMoreFm || widget.library.startupFmExhausted || _moreFmError != null ||
         notification.depth != 0 || notification.metrics.axis != Axis.horizontal ||
-        notification.metrics.extentAfter > 144) {
+        notification.metrics.extentAfter > 144 ||
+        notification.metrics.pixels <= notification.metrics.minScrollExtent) {
       return false;
     }
     final delta = switch (notification) {
@@ -440,7 +442,7 @@ class _DiscoverCarousel extends StatefulWidget {
 class _DiscoverCarouselState extends State<_DiscoverCarousel> {
   static const _peek = 18.0;
   static const _maxStackDepth = 3;
-  final _scroll = _DiscoverScrollController();
+  final _scroll = ScrollController();
 
   @override
   void dispose() {
@@ -575,56 +577,55 @@ class _DiscoverCarouselState extends State<_DiscoverCarousel> {
   }
 }
 
-class _DiscoverScrollPhysics extends ScrollPhysics {
-  const _DiscoverScrollPhysics({super.parent});
+class _DiscoverScrollPhysics extends BouncingScrollPhysics {
+  const _DiscoverScrollPhysics({super.parent})
+      : super(decelerationRate: ScrollDecelerationRate.fast);
 
   @override
   _DiscoverScrollPhysics applyTo(ScrollPhysics? ancestor) =>
       _DiscoverScrollPhysics(parent: buildParent(ancestor));
 
+  // 已进入拖动状态时，慢滑松手也能产生一点惯性。
+  @override
+  double get minFlingVelocity => 40;
+
+  @override
+  double get minFlingDistance => 4;
+
+  // 让传入两端弹簧的最大速度一致。
+  @override
+  double get maxFlingVelocity => BouncingScrollSimulation.maxSpringTransferVelocity;
+
+  @override
+  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) {
+    if (position.outOfRange) return super.applyPhysicsToUserOffset(position, offset);
+
+    // 第一次越过边缘就减小拖动幅度，避免快速横滑时一下子拉开太多。
+    final inBounds = offset.clamp(
+      position.pixels - position.maxScrollExtent,
+      position.pixels - position.minScrollExtent,
+    );
+    return inBounds + (offset - inBounds) * frictionFactor(0);
+  }
+
   @override
   Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) {
-    final simulation = super.createBallisticSimulation(position, velocity);
-    if (simulation is ClampingScrollSimulation) {
-      // 降低滑行摩擦，让横滑逐步减速，边界回弹仍由系统滚动物理处理。
-      return ClampingScrollSimulation(
-        position: simulation.position, velocity: simulation.velocity,
-        friction: simulation.friction * 0.8,
-        tolerance: simulation.tolerance,
-      );
-    }
-    return simulation;
-  }
-}
+    final speed = velocity.clamp(-maxFlingVelocity, maxFlingVelocity);
+    if (position.outOfRange) return super.createBallisticSimulation(position, speed);
 
-class _DiscoverScrollController extends ScrollController {
-  @override
-  ScrollPosition createScrollPosition(
-    ScrollPhysics physics, ScrollContext context, ScrollPosition? oldPosition,
-  ) => _DiscoverScrollPosition(
-    physics: physics,
-    context: context,
-    initialPixels: initialScrollOffset,
-    keepScrollOffset: keepScrollOffset,
-    oldPosition: oldPosition,
-    debugLabel: debugLabel,
-  );
-}
+    final tolerance = toleranceFor(position);
+    if (speed.abs() < tolerance.velocity) return null;
 
-class _DiscoverScrollPosition extends ScrollPositionWithSingleContext {
-  _DiscoverScrollPosition({
-    required super.physics,
-    required super.context,
-    super.initialPixels,
-    super.keepScrollOffset,
-    super.oldPosition,
-    super.debugLabel,
-  });
-
-  @override
-  void goBallistic(double velocity) {
-    // 只提高松手时的速度，分页或窗口缩放引起的惯性重算不再提速。
-    super.goBallistic(activity is DragScrollActivity && !outOfRange ? velocity * 1.20 : velocity);
+    // 列表沿松手方向慢慢减速，滑过任一端时交给同一套弹簧收回。
+    return BouncingScrollSimulation(
+      spring: spring,
+      position: position.pixels,
+      velocity: speed,
+      leadingExtent: position.minScrollExtent,
+      trailingExtent: position.maxScrollExtent,
+      tolerance: tolerance,
+      constantDeceleration: 360,
+    );
   }
 }
 

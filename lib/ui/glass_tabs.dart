@@ -89,7 +89,8 @@ class GlassNavigationBar extends StatelessWidget {
                     data: theme.copyWith(splashFactory: NoSplash.splashFactory),
                     child: NavigationBar(
                       height: barHeight,
-                      labelPadding: EdgeInsets.zero,
+                      // 居中布局下，补 4 个逻辑像素的底部留白会将标签上移 2 个像素。
+                      labelPadding: const EdgeInsets.only(bottom: 4),
                       backgroundColor: Colors.transparent,
                       surfaceTintColor: Colors.transparent,
                       indicatorColor: Colors.transparent,

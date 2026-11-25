@@ -7,6 +7,7 @@
     <string name="playback_notification_next">下一首</string>
     <string name="playback_notification_like">喜欢</string>
     <string name="playback_notification_unlike">取消喜欢</string>
+    <string name="playback_notification_exit">退出应用</string>
 
     <!-- 通知栏的自定义视图由系统加载，直接使用随系统日夜切换的图标颜色。 -->
     <color name="playback_notification_icon">#212121</color>

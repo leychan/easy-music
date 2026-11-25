@@ -250,7 +250,7 @@ class _SleepTimerDialogState extends State<_SleepTimerDialog> {
                 ],
               ),
               const SizedBox(height: 12),
-              if (widget.player.onSleepExit != null)
+              if (widget.player.onExit != null)
                 Wrap(
                   spacing: 8,
                   children: [

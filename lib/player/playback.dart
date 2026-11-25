@@ -38,12 +38,13 @@ class Playback extends BaseAudioHandler {
   final sleepDeadline = ValueNotifier<DateTime?>(null);
   final fadeMilliseconds = ValueNotifier(0);
   final _queuePreparation = ValueNotifier<QueuePreparation?>(null);
-  Future<void> Function()? onSleepExit;
+  Future<void> Function()? onExit;
   bool Function(Track)? isNotificationFavorite;
   Future<void> Function(Track)? onToggleNotificationFavorite;
   final message = ValueNotifier<String?>(null);
 
   static const _toggleFavoriteAction = 'dev.easymusic.easy_music.TOGGLE_FAVORITE';
+  static const _exitAction = 'dev.easymusic.easy_music.EXIT';
   MediaItem? _publishedItem;
   bool _updatingQueue = false;
   bool _queueDirty = false;
@@ -152,9 +153,9 @@ class Playback extends BaseAudioHandler {
         final action = _sleepAction;
         cancelSleepTimer();
         try {
-          if (action == SleepAction.exit && onSleepExit != null) {
-            await _stopAndSave();
-            await onSleepExit!();
+          final exit = onExit;
+          if (action == SleepAction.exit && exit != null) {
+            await _stopAndExit(exit);
           } else {
             await _pauseAndSave();
           }
@@ -185,8 +186,8 @@ class Playback extends BaseAudioHandler {
     final slot = tracks.value.indexWhere((track) => track.id == incoming.id);
     final existing = tracks.value[slot];
     if ((incoming.kugouHash != null || incoming.isCloud) &&
-        existing.source != incoming.source) {
-      // 换播放地址时，保留已补齐的封面和歌词。
+        (existing.source != incoming.source || existing.albumAudioId != incoming.albumAudioId)) {
+      // 更新播放地址或专辑曲目编号时，保留已补齐的封面和歌词。
       final updated = [...tracks.value];
       updated[slot] = incoming.copyWith(
         artUri: incoming.artUri ?? existing.artUri,
@@ -479,11 +480,27 @@ class Playback extends BaseAudioHandler {
           name: _toggleFavoriteAction,
           extras: {'trackId': current.id},
         ),
+      if (Platform.isAndroid && current != null)
+        MediaControl.custom(
+          androidIcon: 'drawable/ic_notification_close',
+          label: '退出应用',
+          name: _exitAction,
+        ),
     ];
   }
 
   @override
   Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
+    if (name == _exitAction) {
+      final exit = onExit;
+      if (exit != null) {
+        await _commands.synchronized(() async {
+          cancelSleepTimer();
+          await _stopAndExit(exit);
+        });
+      }
+      return null;
+    }
     if (name != _toggleFavoriteAction) return super.customAction(name, extras);
     final current = tracks.value.elementAtOrNull(index);
     // 通知点击和切歌可能同时发生，忽略旧曲目的按钮事件。
@@ -899,6 +916,14 @@ class Playback extends BaseAudioHandler {
 
   @override
   Future<void> stop() => _commands.synchronized(_stopAndSave);
+
+  Future<void> _stopAndExit(Future<void> Function() exit) async {
+    // 作废正在取播放地址的换队列请求，避免退出时又开始播放。
+    _queueReplacement++;
+    _queuePreparation.value = null;
+    await _stopAndSave();
+    await exit();
+  }
 
   Future<void> _stopAndSave() async {
     _continuation?.advanceFrom = null;

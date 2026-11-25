@@ -33,6 +33,37 @@ void main() {
     expect(store.read().tracks, isEmpty);
   });
 
+  test('通知栏退出先保存并停止播放，在途的换队列请求不会重新播放', () async {
+    final native = _NativePlayer();
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = Playback(store);
+    final ready = player.playbackState.firstWhere(
+      (state) => state.processingState == AudioProcessingState.ready && state.playing,
+    );
+    await player.replaceTracks([track('current')]);
+    await ready.timeout(const Duration(seconds: 2));
+    await native.emit(index: 0, position: const Duration(milliseconds: 500));
+    player.startSleepTimer(const Duration(minutes: 1));
+    final pending = Completer<List<Track>>();
+    final replacing = player.replaceTracks(pending.future);
+
+    var exited = false;
+    player.onExit = () async {
+      expect(player.playbackState.value.processingState, AudioProcessingState.idle);
+      expect(player.playbackState.value.playing, isFalse);
+      expect(player.sleepDeadline.value, isNull);
+      expect(store.read().position, greaterThanOrEqualTo(const Duration(milliseconds: 500)));
+      exited = true;
+    };
+    await player.customAction('dev.easymusic.easy_music.EXIT');
+    expect(exited, isTrue);
+
+    pending.complete([track('late')]);
+    expect(await replacing, isFalse);
+    expect(store.read().tracks.map((item) => item.id), ['current']);
+  });
+
   test('播放全部清除旧队列的随机模式，按列表顺序开始并保存', () async {
     _NativePlayer();
     final store = SessionStore(':memory:');
@@ -55,6 +86,21 @@ void main() {
     expect(player.playbackState.value.shuffleMode, AudioServiceShuffleMode.none);
     expect(store.read().tracks.map((item) => item.id), ids);
     expect(store.readOriginalQueueOrder(), isNull);
+    await player.clearQueue();
+  });
+
+  test('重复点播会更新已有酷狗歌曲的专辑曲目编号', () async {
+    _NativePlayer();
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = Playback(store);
+    final old = track('kg:abc').copyWith(albumAudioId: 17);
+    await player.addTracks([old]);
+
+    await player.playTracks([old.copyWith(albumAudioId: 42)]);
+
+    expect(player.tracks.value.single.albumAudioId, 42);
+    expect(store.read().tracks.single.albumAudioId, 42);
     await player.clearQueue();
   });
 
@@ -182,14 +228,18 @@ class _NativePlayer {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   late String _id;
 
-  Future<void> emit({required int index, bool completed = false}) async {
+  Future<void> emit({
+    required int index,
+    bool completed = false,
+    Duration position = Duration.zero,
+  }) async {
     await _messenger.handlePlatformMessage(
       '$_eventPrefix.$_id',
       const StandardMethodCodec().encodeSuccessEnvelope({
         'processingState': completed ? 4 : 3,
         'currentIndex': index,
         'updateTime': DateTime.now().millisecondsSinceEpoch,
-        'updatePosition': completed ? 1000000 : 0,
+        'updatePosition': completed ? 1000000 : position.inMicroseconds,
         'bufferedPosition': 1000000,
         'duration': 1000000,
       }),

@@ -96,6 +96,7 @@ class AudioCache {
     }
     final key = _hash([
       track.id,
+      track.albumAudioId,
       origin.toString(),
       track.audioQuality?.apiName,
     ]);
@@ -107,9 +108,9 @@ class AudioCache {
   }
 
   void retainTracks(List<Track> tracks) {
-    final sources = {for (final track in tracks) (track.id, track.source)};
+    final sources = {for (final track in tracks) (track.id, track.albumAudioId, track.source)};
     _routes.removeWhere(
-      (_, track) => !sources.contains((track.id, track.source)),
+      (_, track) => !sources.contains((track.id, track.albumAudioId, track.source)),
     );
   }
 
@@ -128,7 +129,8 @@ class AudioCache {
   static String _key(Track track) {
     // 酷狗的临时授权链接会变化。音质未知的旧队列和普通直链按完整地址匹配。
     if (track.kugouHash != null && track.audioQuality != null) {
-      return _hash([track.id, track.audioQuality!.apiName]);
+      // 同一个哈希补正专辑曲目编号后，重新获取音频，避免读到旧编号的缓存。
+      return _hash([track.id, track.albumAudioId, track.audioQuality!.apiName]);
     }
     return _hash([track.source.toString()]);
   }

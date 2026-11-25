@@ -126,12 +126,8 @@ class Song {
     return Song(
       hash: _string(json['FileHash']).toUpperCase(),
       title: _firstNonEmpty(json, const ['SongName', 'FileName', 'OriSongName']),
-      // 搜索接口**没有** `AlbumAudioID` 字段，真实字段是 `Audioid`
-      // （`Scid` 是同一个值）。按 `AlbumAudioID` 取会永远是 0，
-      // 于是 `playable` 判 false——列表里有歌，但每一首都点不动。
-      // 注意要用「取第一个非零值」而不是 `??`：某些响应里 `AlbumAudioID`
-      // 是字符串 "0"，`??` 会把它当成有效值，后面的 `Audioid` 就取不到了。
-      albumAudioId: _firstPositiveInt(json, const ['AlbumAudioID', 'Audioid', 'Scid', 'MixSongID']),
+      // 播放用的专辑曲目编号在搜索里叫 MixSongID。旧响应只有 Audioid/Scid 时再回退。
+      albumAudioId: _firstPositiveInt(json, const ['AlbumAudioID', 'MixSongID', 'Audioid', 'Scid']),
       albumId: _firstPositiveInt(json, const ['AlbumID', 'AlbumId', 'album_id']),
       albumName: _string(json['AlbumName']),
       albumImage: _cover(json, const ['Image', 'AlbumImage', 'Pic', 'pic']),

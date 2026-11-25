@@ -143,7 +143,7 @@ void main() {
             'lists': [
               {
                 'type': 'song', 'total': 61,
-                'lists': [{'FileHash': 'ABC', 'SongName': '示例歌曲', 'Audioid': 17}],
+                'lists': [{'FileHash': 'ABC', 'SongName': '示例歌曲', 'Audioid': 17, 'MixSongID': '42'}],
               },
               {
                 'type': 'collect', 'total': 31,
@@ -163,7 +163,7 @@ void main() {
 
     final result = await KugouMusicApi(client).searchComplex('示例', page: 2);
     expect(result.hits.keys, [SearchType.song, SearchType.playlist]);
-    expect(result.hits[SearchType.song]!.single.song!.albumAudioId, 17);
+    expect(result.hits[SearchType.song]!.single.song!.albumAudioId, 42);
     expect(result.hits[SearchType.playlist]!.single.title, '示例歌单');
     expect(result.hasMore, isTrue);
   });

@@ -16,6 +16,7 @@ import androidx.media.app.NotificationCompat.MediaStyle
 
 private const val EXTRA_MEDIA_SESSION = "dev.easymusic.easy_music.MEDIA_SESSION"
 private const val FAVORITE_ACTION = "dev.easymusic.easy_music.TOGGLE_FAVORITE"
+private const val EXIT_ACTION = "dev.easymusic.easy_music.EXIT"
 private const val TRACK_ID = "trackId"
 
 /** 由播放服务发布，首次播放、暂停和切歌都使用同一张通知。 */
@@ -79,6 +80,11 @@ internal class PlaybackNotification(private val context: Context) {
                 action(token, FAVORITE_ACTION, trackId),
             )
         }
+        builder.addAction(
+            R.drawable.ic_notification_close,
+            context.getString(R.string.playback_notification_exit),
+            action(token, EXIT_ACTION),
+        )
 
         // 绑定现有会话，由系统绘制媒体卡片。折叠时优先显示三个播放按钮。
         return builder.setStyle(MediaStyle().setMediaSession(token).setShowActionsInCompactView(0, 1, 2))
@@ -109,6 +115,7 @@ class PlaybackNotificationActionReceiver : BroadcastReceiver() {
             "play" -> controls.play()
             "pause" -> controls.pause()
             "next" -> controls.skipToNext()
+            EXIT_ACTION -> controls.sendCustomAction(EXIT_ACTION, null)
             FAVORITE_ACTION -> {
                 val trackId = intent.data?.schemeSpecificPart ?: return
                 controls.sendCustomAction(FAVORITE_ACTION, Bundle().apply { putString(TRACK_ID, trackId) })

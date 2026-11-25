@@ -49,7 +49,7 @@ class MusicLibrary extends ChangeNotifier {
   /// 搜索结果缓存的条数上限，避免长时间滚动把内存吃满。
   static const _cacheLimit = 400;
 
-  final _urlCache = <(String, AudioQuality), SongUrl>{};
+  final _urlCache = <(String, int, AudioQuality), SongUrl>{};
   final _covers = <(bool, int), String>{};
   final _pendingCovers = <(bool, int), Future<Map<int, String>>>{};
   final _favoriteCommands = Lock();
@@ -628,7 +628,7 @@ class MusicLibrary extends ChangeNotifier {
     bool refresh = false,
     AudioQuality quality = AudioQuality.standard,
   }) async {
-    final key = (song.id, quality);
+    final key = (song.id, song.albumAudioId, quality);
     final cached = _urlCache[key];
     if (!refresh && cached != null) return cached;
     final api = this.api;

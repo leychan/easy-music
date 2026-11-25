@@ -49,6 +49,7 @@ class MainActivity : AudioServiceActivity() {
                     "playbackNotificationNotice" -> {
                         if (value != null) Toast.makeText(applicationContext, value, Toast.LENGTH_SHORT).show()
                     }
+                    "quit" -> finishAndRemoveTask()
                     else -> {
                         result.notImplemented()
                         return@setMethodCallHandler

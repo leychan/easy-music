@@ -37,20 +37,16 @@ void main() {
   }
 
   /// 一条搜索结果，字段取自真实响应（已裁剪）。
-  ///
-  /// 注意这里**故意不放** `AlbumAudioID`：真实响应里根本没有这个字段，
-  /// 用的是 `Audioid`。测试数据如果自造一个 `AlbumAudioID`，就会掩盖
-  /// 「搜索列表有歌但每首都点不动」这个真实故障。
   Map<String, Object?> rawSong({
     String hash = 'B3A52A7A958BF0AED0EBFBA2E9A818B7',
     String songName = '晴天',
-    int albumAudioId = 20505418,
   }) => {
     'FileHash': hash.toLowerCase(),
     'SongName': songName,
     'SingerName': '周杰伦',
-    'Audioid': albumAudioId,
-    'Scid': albumAudioId,
+    'MixSongID': '32100650',
+    'Audioid': 20505418,
+    'Scid': 20505418,
     'AlbumID': 966846,
     'AlbumName': '叶惠美',
     'Duration': 269,
@@ -67,7 +63,7 @@ void main() {
       expect(song.hash, 'B3A52A7A958BF0AED0EBFBA2E9A818B7');
       expect(song.title, '晴天');
       expect(song.artist, '周杰伦');
-      expect(song.albumAudioId, 20505418);
+      expect(song.albumAudioId, 32100650);
       expect(song.duration, const Duration(seconds: 269));
       expect(song.coverUrl(240), contains('/240/'));
       expect(song.playable, isTrue);
@@ -117,10 +113,7 @@ void main() {
       expect(song?.coverUrl(150), 'https://imge.kugou.com/stdmusic/150/ab.jpg');
     });
 
-    test('album_audio_id 从 Audioid 取（搜索接口没有 AlbumAudioID）', () {
-      // 真实响应的 key 是 Audioid / Scid，没有 AlbumAudioID。
-      // 只按 AlbumAudioID 取会得到 0 → playable 为 false，
-      // 界面表现是「搜到了歌，但每一首都点不动」。
+    test('旧条目缺少专辑曲目编号时兼容 Audioid', () {
       final song = Song.fromJson({
         'FileHash': 'AA',
         'SongName': '晴天',
@@ -131,21 +124,9 @@ void main() {
       expect(song.playable, isTrue);
     });
 
-    test('AlbumAudioID 为 "0" 时回退到 Audioid', () {
-      // 用 `??` 会把这个字符串 "0" 当成有效值，后面的 Audioid 就取不到了。
-      final song = Song.fromJson({
-        'FileHash': 'AA',
-        'SongName': '晴天',
-        'AlbumAudioID': '0',
-        'Audioid': 20505418,
-      });
-      expect(song.albumAudioId, 20505418);
-    });
-
-    test('Audioid 也缺失时才判为不可播放', () {
-      final song = Song.fromJson({'FileHash': 'AA', 'SongName': 'x'});
-      expect(song.albumAudioId, 0);
-      expect(song.playable, isFalse);
+    test('AlbumAudioID 为 "0" 时优先取 MixSongID', () {
+      final song = Song.fromJson({...rawSong(), 'AlbumAudioID': '0'});
+      expect(song.albumAudioId, 32100650);
     });
   });
 
@@ -165,6 +146,7 @@ void main() {
       final songs = await api.searchSongs('晴天');
       expect(songs, hasLength(1));
       expect(songs.single.title, '晴天');
+      expect(songs.single.albumAudioId, 32100650);
 
       final request = requests.single;
       expect(request.url.path, '/v2/search/song');
@@ -303,14 +285,14 @@ void main() {
       expect(requests.first.headers['x-router'], 'trackercdngz.kugou.com');
       final authorize = requests[1].url.queryParameters;
       expect(authorize['authorization'], 'user-auth');
-      expect(authorize['album_audio_id'], '${song.albumAudioId}');
+      expect(authorize['album_audio_id'], '32100650');
       // queryParameters 无法区分 module 和 module=，要断言实际请求的原始查询串。
       expect(requests.last.url.query.split('&'), contains('module='));
       final tracker = Map.of(requests.last.url.queryParameters);
       expect(tracker['auth'], 'track-auth');
       expect(tracker['open_time'], '1787673734');
       expect(tracker['hash'], song.hash.toLowerCase());
-      expect(tracker['album_audio_id'], '${song.albumAudioId}');
+      expect(tracker['album_audio_id'], '32100650');
       expect(tracker['quality'], '128');
       expect(tracker['pid'], '2');
       expect(tracker['page_id'], '151369488');

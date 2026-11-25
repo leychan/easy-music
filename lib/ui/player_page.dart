@@ -807,14 +807,9 @@ class _QueuePanel extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '播放队列',
-                        style: theme.textTheme.titleMedium,
-                      ),
-                    ),
+                child: WorkspaceHeading(
+                  title: const Text('播放队列'),
+                  actions: [
                     Text('${tracks.length} 首', style: theme.textTheme.labelMedium),
                     IconButton(
                       tooltip: '清空队列',

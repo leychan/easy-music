@@ -110,21 +110,16 @@ void main() {
     expect(originRequests, 1);
   });
 
-  test('同一酷狗音质可复用临时地址，切换音质会读取对应音频', () async {
+  test('酷狗音频按专辑曲目和音质缓存，临时地址更新后仍可复用', () async {
     final first = track(
       'first',
       id: 'kg:example',
       quality: AudioQuality.standard,
-    );
-    final renewed = track(
-      'new-url',
-      id: first.id,
-      quality: AudioQuality.standard,
-    );
-    final lossless = track(
-      'lossless',
-      id: first.id,
-      quality: AudioQuality.lossless,
+    ).copyWith(albumAudioId: 17);
+    final renewed = first.copyWith(source: track('new-url').source);
+    final lossless = first.copyWith(
+      source: track('lossless').source,
+      audioQuality: AudioQuality.lossless,
     );
     await read(await response(first));
     await waitForTracks(1);
@@ -133,6 +128,11 @@ void main() {
     await read(await response(lossless));
     await waitForTracks(2);
     expect(originRequests, 2);
+
+    final corrected = first.copyWith(albumAudioId: 42);
+    await read(await response(corrected));
+    expect(originRequests, 3);
+    await waitForTracks(3);
   });
 
   test('分段和重复请求合并为整首，有缺口时不计入缓存', () async {

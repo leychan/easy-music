@@ -54,8 +54,12 @@ Future<void> main() async {
         androidStopForegroundOnPause: false,
       ),
     );
+    handler.onExit = Platform.isLinux
+        ? quitDesktopApp
+        : Platform.isAndroid
+        ? quitAndroidApp
+        : SystemNavigator.pop;
     await handler.restore();
-    handler.onSleepExit = Platform.isLinux ? quitDesktopApp : SystemNavigator.pop;
     if (Platform.isLinux) _bindTrayPlayback(handler);
     playback = handler;
   } catch (error, stack) {

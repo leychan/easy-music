@@ -16,6 +16,8 @@ Future<void> setDesktopLyricText(String text) =>
 
 Future<void> quitDesktopApp() => _desktop.invokeMethod<void>('quit');
 
+Future<void> quitAndroidApp() => _external.invokeMethod<void>('quit');
+
 Future<void> updateTrayPlayback({
   required String? title,
   required bool playing,

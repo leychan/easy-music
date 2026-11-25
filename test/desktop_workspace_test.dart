@@ -286,6 +286,11 @@ void main() {
     await tester.tap(find.byTooltip('打开播放队列'));
     await tester.pumpAndSettle();
     expect(find.text('播放队列'), findsOneWidget);
+    TextStyle headingStyle(String title) {
+      final text = find.text(title);
+      return DefaultTextStyle.of(tester.element(text)).style.merge(tester.widget<Text>(text).style);
+    }
+    expect(headingStyle('播放队列'), headingStyle('发现音乐'));
     expect(find.byTooltip('清空队列'), findsOneWidget);
     await tester.tap(find.byTooltip('收起队列'));
     await tester.pumpAndSettle();
@@ -903,6 +908,31 @@ void main() {
       await tester.ensureVisible(find.text('测试歌单 1'));
       await tester.pumpAndSettle();
       final scroll = tester.state<ScrollableState>(carousel).position;
+
+      final edgeStretch = <double>[];
+      final edgeReturn = <double>[];
+      for (final edge in [scroll.minScrollExtent, scroll.maxScrollExtent]) {
+        scroll.jumpTo(edge);
+        await tester.pumpAndSettle();
+        final direction = edge == scroll.minScrollExtent ? 1.0 : -1.0;
+        await tester.drag(carousel, Offset(80 * direction, 0), kind: device);
+        final overscroll = (edge - scroll.pixels) * direction;
+        expect(overscroll, greaterThan(0));
+        expect(overscroll, lessThan(40));
+        edgeStretch.add(overscroll);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
+        final remaining = (edge - scroll.pixels).abs();
+        expect(remaining, lessThan(overscroll));
+        edgeReturn.add(remaining);
+        await tester.pumpAndSettle();
+        expect(scroll.pixels, edge);
+      }
+      expect(edgeStretch.last, closeTo(edgeStretch.first, 0.01));
+      expect(edgeReturn.last, closeTo(edgeReturn.first, 0.01));
+      scroll.jumpTo(scroll.minScrollExtent);
+      await tester.pumpAndSettle();
+
       expect(find.text('测试歌单 1').hitTestable(), findsOneWidget);
       expect(find.text('测试歌单 3').hitTestable(), findsOneWidget);
       final isDesktop = platform == TargetPlatform.linux;
@@ -915,6 +945,31 @@ void main() {
         of: find.ancestor(of: stacked, matching: find.byType(InkWell)).first,
         matching: find.byType(Cover),
       );
+
+      for (final direction in [1.0, -1.0]) {
+        scroll.jumpTo(stride * 2);
+        await tester.pumpAndSettle();
+        final gesture = await tester.startGesture(tester.getCenter(carousel), kind: device);
+        // 模拟缓慢拖动。保留事件时间戳，让 Flutter 计算松手时的速度。
+        for (var step = 1; step <= 40; step++) {
+          await gesture.moveBy(Offset(-1.6 * direction, 0),
+            timeStamp: Duration(milliseconds: step * 20),
+          );
+        }
+        final releasedAt = scroll.pixels;
+        await gesture.up(timeStamp: const Duration(milliseconds: 800));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        final firstGlide = (scroll.pixels - releasedAt) * direction;
+        expect(firstGlide, greaterThan(1));
+        final nextFrameStart = scroll.pixels;
+        await tester.pump(const Duration(milliseconds: 50));
+        final nextGlide = (scroll.pixels - nextFrameStart) * direction;
+        expect(nextGlide, inExclusiveRange(0, firstGlide));
+        await tester.pumpAndSettle();
+        expect((scroll.pixels - releasedAt) * direction, greaterThanOrEqualTo(firstGlide + nextGlide - 0.01));
+      }
+
       scroll.jumpTo(stride - 2);
       await tester.pumpAndSettle();
       final before = tester.getTopLeft(unfoldingCover()).dx;
@@ -1451,12 +1506,19 @@ void main() {
       session: const KugouSession(userid: 47, token: 'playlist-test', nickname: '测试账号', avatar: ''),
     );
     expect(find.byType(DesktopWorkspace), findsNothing);
-    expect(find.byType(NavigationBar), findsOneWidget);
+    final navigation = find.byType(NavigationBar);
+    expect(navigation, findsOneWidget);
     expect(find.text('Easy Music'), findsNothing);
     expect(tester.getTopLeft(find.byType(DiscoverPage)).dy, 24);
     for (final tab in ['发现', '搜索', '队列', '我的']) {
-      await tester.tap(find.widgetWithText(NavigationDestination, tab));
+      final destination = find.widgetWithText(NavigationDestination, tab);
+      await tester.tap(destination);
       await tester.pumpAndSettle();
+      final icon = find.descendant(of: destination, matching: find.byType(Icon));
+      final label = find.descendant(of: destination, matching: find.text(tab));
+      final topGap = tester.getTopLeft(label).dy - tester.getBottomLeft(icon).dy;
+      final bottomGap = tester.getBottomLeft(navigation).dy - tester.getBottomLeft(label).dy;
+      expect(bottomGap, closeTo(topGap, 1), reason: tab);
       expect(find.byType(AppBar), findsNothing);
       expect(find.byTooltip('账号'), findsNothing);
       expect(find.byTooltip('添加音乐'), findsNothing);
