@@ -1,7 +1,7 @@
 name: easy_music
 description: 本地和在线直链音乐播放器，支持 Linux 和 Android。
 publish_to: none
-version: 0.1.4+4024
+version: 0.1.5+4025
 
 environment:
   sdk: ^3.14.0

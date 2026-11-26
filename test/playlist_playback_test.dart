@@ -17,6 +17,7 @@ import 'package:easy_music/ui/discover_page.dart';
 import 'package:easy_music/ui/mini_player_bar.dart';
 import 'package:easy_music/ui/mv_player_page.dart';
 import 'package:easy_music/ui/now_playing.dart';
+import 'package:easy_music/ui/player_controls.dart';
 import 'package:easy_music/ui/search_page.dart';
 import 'package:easy_music/ui/song_tile.dart';
 import 'package:easy_music/ui/workspace_page.dart';
@@ -681,6 +682,41 @@ void main() {
     expect(spinner, findsNothing);
     expect(barText(old.title), findsOneWidget);
     expect(barCover(), old.artUri.toString());
+  });
+
+  testWidgets('缓冲结束时播放按钮和切歌按钮的位置保持不变', (tester) async {
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = _TestPlayer(store);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          PlayerControls(player: player, compact: true),
+          PlayerControls(player: player, stage: true, showStageVolume: false),
+        ]),
+      ),
+    ));
+    await player.playTracks([
+      Track.online('first', 'https://example.org/first.mp3'),
+    ]);
+    final ready = player.playbackState.value;
+    player.playbackState.add(
+      ready.copyWith(processingState: AudioProcessingState.buffering),
+    );
+    await tester.pump();
+
+    List<Rect> buttonBounds() => [
+      for (final tooltip in ['上一首', '暂停', '下一首'])
+        for (var bar = 0; bar < 2; bar++)
+          tester.getRect(find.byTooltip(tooltip).at(bar)),
+    ];
+
+    expect(find.byType(CircularProgressIndicator), findsNWidgets(2));
+    final bufferingBounds = buttonBounds();
+    player.playbackState.add(ready);
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(buttonBounds(), bufferingBounds);
   });
 }
 

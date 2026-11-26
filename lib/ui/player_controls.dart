@@ -105,21 +105,28 @@ class PlayerControls extends StatelessWidget {
                       valueListenable: player.queuePreparation,
                       builder: (context, preparation, _) {
                         final preparing = preparation != null;
+                        final iconSize = stage ? 50.0 : (compact ? 22.0 : 28.0);
                         return (stage ? IconButton.new : IconButton.filled)(
-                          iconSize: stage ? 50 : (compact ? 22 : 28),
+                          iconSize: iconSize,
                           tooltip: preparing
                               ? '正在准备播放'
                               : (playing ? '暂停' : '播放'),
                           icon: preparing || buffering
                               ? SizedBox.square(
-                                  dimension: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: preparing
-                                        ? colors.primary
-                                        : (stage
-                                              ? colors.onSurface
-                                              : colors.onPrimary),
+                                  // 转圈时也留足暂停图标的空间，缓冲结束时整排按钮不会跳动。
+                                  dimension: iconSize,
+                                  child: Center(
+                                    child: SizedBox.square(
+                                      dimension: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: preparing
+                                            ? colors.primary
+                                            : (stage
+                                                  ? colors.onSurface
+                                                  : colors.onPrimary),
+                                      ),
+                                    ),
                                   ),
                                 )
                               : Icon(
