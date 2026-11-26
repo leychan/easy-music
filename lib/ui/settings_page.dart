@@ -9,6 +9,7 @@ import 'audio_cache_page.dart';
 import 'external_actions.dart';
 import 'playback_options.dart';
 import 'music_toast.dart';
+import 'update_check_tile.dart';
 import 'workspace_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -86,6 +87,7 @@ class SettingsPage extends StatelessWidget {
                 builder: (_) => AppearancePage(appearance: appearance),
               )),
             ),
+          const UpdateCheckTile(),
           ListTile(
             leading: const Icon(Icons.info_outline_rounded),
             title: const Text('关于'),
