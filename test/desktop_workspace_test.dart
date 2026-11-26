@@ -1774,6 +1774,62 @@ void main() {
     expect(find.widgetWithText(ListTile, '设置').hitTestable(), findsOneWidget);
   });
 
+  testWidgets('Android 私人 FM 竖向列表自动翻页并与发现页同步', (tester) async {
+    var batches = 0;
+    final pendingBatch = Completer<void>();
+    await mount(tester, TargetPlatform.android, const Size(390, 760),
+      emptyQueue: true,
+      session: const KugouSession(userid: 47, token: 'fm-test', nickname: '测试账号', avatar: ''),
+      respond: (request) {
+        if (request.url.path != '/v2/personal_recommend') return null;
+        Map<String, Object> batch(int first) => {
+          'status': 1,
+          'data': {'song_list': [
+            for (var id = first; id < first + 10; id++)
+              {'FileHash': 'FM$id', 'SongName': '共享推荐$id', 'Audioid': id},
+          ]},
+        };
+        return switch (++batches) {
+          1 => batch(1),
+          2 => batch(11),
+          3 => batch(21),
+          4 => pendingBatch.future.then((_) => batch(31)),
+          _ => {'status': 1, 'data': {'song_list': []}},
+        };
+      },
+    );
+    final row = find.byKey(const PageStorageKey('私人 FM'));
+    final horizontal = find.descendant(of: row, matching: find.byType(Scrollable));
+    final horizontalPosition = tester.state<ScrollableState>(horizontal).position;
+    horizontalPosition.jumpTo(horizontalPosition.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(batches, 2);
+
+    await tester.tap(viewAll('私人 FM'));
+    await tester.pumpAndSettle();
+    final vertical = find.descendant(of: find.byType(SongListPage), matching: find.byType(Scrollable));
+    await tester.scrollUntilVisible(find.text('共享推荐11'), 120, scrollable: vertical);
+    expect(batches, 2);
+    await tester.scrollUntilVisible(find.text('共享推荐21'), 120, scrollable: vertical);
+    await tester.pump();
+    expect(find.text('共享推荐21').hitTestable(), findsOneWidget);
+
+    final verticalPosition = tester.state<ScrollableState>(vertical).position;
+    verticalPosition.jumpTo(verticalPosition.maxScrollExtent);
+    await tester.pump();
+    expect(batches, 4);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    // 已返回发现页时，仍要收到竖向列表发起的分页结果。
+    pendingBatch.complete();
+    await tester.pumpAndSettle();
+    // 第 31 首在四批歌曲的约八成处，跳到这里不会触发下一次请求。
+    horizontalPosition.jumpTo(horizontalPosition.maxScrollExtent * 0.8);
+    await tester.pumpAndSettle();
+    expect(find.text('共享推荐31').hitTestable(), findsOneWidget);
+    expect(batches, 4);
+  });
+
   testWidgets('Android 私人 FM 左滑自动追加，加载图标居中，失败可重试', (tester) async {
     var batches = 0;
     final pendingBatch = Completer<void>();

@@ -173,8 +173,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Future<void> _loadMoreFm() async {
+    // 打开竖向列表后，发现页剩余的惯性滚动不再发起分页。
     if (!mounted || !widget.signedIn || (_fm?.isEmpty ?? true) ||
-        _loadingFm || _loadingMoreFm || widget.library.startupFmExhausted) {
+        _loadingFm || _loadingMoreFm || widget.library.startupFmExhausted ||
+        ModalRoute.isCurrentOf(context) == false) {
       return;
     }
     final owner = widget.userid;
@@ -264,17 +266,31 @@ class _DiscoverPageState extends State<DiscoverPage> {
   };
 
   void _openFeed(String title, List<Song> songs, {required bool privateFm}) {
-    final paginated = privateFm && widget.desktop;
+    final library = widget.library;
+    final attempt = _loadAttempt;
     final showHearts = _showFeedHearts(context);
+
+    Future<List<Song>> appendFm() async {
+      final updated = await library.appendStartupFmSongs();
+      // 返回发现页时，即使竖向列表的请求还没完成，横向卡片也会收到结果。
+      if (mounted && attempt == _loadAttempt) {
+        setState(() {
+          _fm = updated;
+          _moreFmError = null;
+        });
+      }
+      return updated;
+    }
+
     Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => SongListPage(
         title: title,
-        loader: paginated ? widget.library.startupFmSongs : () async => songs,
-        loadMore: paginated ? widget.library.appendStartupFmSongs : null,
+        loader: privateFm ? library.startupFmSongs : () async => songs,
+        loadMore: privateFm ? appendFm : null,
         privateFm: privateFm,
         showFavoriteButton: showHearts,
         player: widget.player,
-        library: widget.library,
+        library: library,
       ),
     ));
   }
