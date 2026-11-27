@@ -792,7 +792,7 @@ class SongListPage extends StatefulWidget {
   const SongListPage({
     super.key,
     required this.title,
-    required this.loader,
+    this.loader,
     required this.player,
     required this.library,
     this.subtitle,
@@ -802,8 +802,12 @@ class SongListPage extends StatefulWidget {
     this.reloadOnFavoriteChange = false,
     this.showFavoriteButton = true,
     this.loadMore,
+    this.pageLoader,
     this.privateFm = false,
-  });
+    this.headerBuilder,
+    this.onOpenPlayer,
+  }) : assert(loader != null || pageLoader != null),
+       assert(pageLoader == null || (loader == null && loadMore == null));
 
   final String title;
   final String? subtitle;
@@ -813,9 +817,13 @@ class SongListPage extends StatefulWidget {
   final bool reloadOnFavoriteChange;
   final bool showFavoriteButton;
   final bool privateFm;
-  final Future<List<Song>> Function() loader;
+  final Future<List<Song>> Function()? loader;
   /// 返回追加后的完整列表，保留已经加载的歌曲和滚动位置。
   final Future<List<Song>> Function()? loadMore;
+  final Future<CatalogSearchResult<List<Song>>> Function(int page)? pageLoader;
+  /// 自带导航和播放入口的页头，与歌曲列表一起滚动。
+  final Widget Function(BuildContext context, VoidCallback? playAll, bool playAllBusy)? headerBuilder;
+  final VoidCallback? onOpenPlayer;
   final Playback player;
   final MusicLibrary library;
 
@@ -833,7 +841,8 @@ class _SongListPageState extends State<SongListPage> {
   bool _loadingMore = false;
   bool _hasMore = true;
   bool _moreFailed = false;
-  late final ScrollController? _paginationScroll = widget.loadMore == null
+  int _nextPage = 2;
+  late final ScrollController? _paginationScroll = widget.loadMore == null && widget.pageLoader == null
       ? null
       : (ScrollController()..addListener(_prefetch));
 
@@ -857,12 +866,16 @@ class _SongListPageState extends State<SongListPage> {
       _loadingMore = false;
       _hasMore = true;
       _moreFailed = false;
+      _nextPage = 2;
     });
     try {
-      final songs = await widget.loader();
+      final loadPage = widget.pageLoader;
+      final first = loadPage == null ? null : await loadPage(1);
+      final songs = first == null ? await widget.loader!() : _appendUniqueSongs(const [], first.hits);
       if (!mounted || attempt != _loadAttempt) return;
       setState(() {
         _songs = songs;
+        _hasMore = first?.hasMore ?? widget.loadMore != null;
         _loading = false;
         if (songs.isEmpty) _error = '这个列表里还没有歌曲。';
       });
@@ -917,14 +930,16 @@ class _SongListPageState extends State<SongListPage> {
 
   Future<void> _loadNextPage() async {
     final load = widget.loadMore;
-    if (load == null || _loading || _loadingMore || !_hasMore || _songs.isEmpty) return;
+    final loadPage = widget.pageLoader;
+    if ((load == null && loadPage == null) || _loading || _loadingMore || !_hasMore || _songs.isEmpty) return;
     final attempt = _loadAttempt;
     setState(() {
       _loadingMore = true;
       _moreFailed = false;
     });
     try {
-      final songs = await load();
+      final page = loadPage == null ? null : await loadPage(_nextPage);
+      final songs = page == null ? await load!() : _appendUniqueSongs(_songs, page.hits);
       if (!mounted || attempt != _loadAttempt) return;
       // 分页返回完整列表，旧条目可能仍用未补图的快照。
       final covers = {
@@ -939,7 +954,9 @@ class _SongListPageState extends State<SongListPage> {
             song,
       ];
       setState(() {
-        _hasMore = updated.length > _songs.length;
+        // 同一页重复返回时停止，避免滑到底后反复请求。
+        _hasMore = (page?.hasMore ?? true) && updated.length > _songs.length;
+        _nextPage++;
         _songs = updated;
         _loadingMore = false;
       });
@@ -952,6 +969,11 @@ class _SongListPageState extends State<SongListPage> {
         _moreFailed = true;
       });
     }
+  }
+
+  List<Song> _appendUniqueSongs(List<Song> existing, List<Song> incoming) {
+    final ids = existing.map((song) => song.id).toSet();
+    return [...existing, for (final song in incoming) if (ids.add(song.id)) song];
   }
 
   Future<void> _play(Song song) async {
@@ -1009,11 +1031,26 @@ class _SongListPageState extends State<SongListPage> {
 
   Future<void> _openNowPlaying() async {
     if (ModalRoute.of(context)?.isCurrent == false) return;
+    if (widget.onOpenPlayer case final open?) {
+      open();
+      return;
+    }
     await showNowPlaying(context, player: widget.player, library: widget.library);
   }
 
   @override
   Widget build(BuildContext context) {
+    final body = SafeArea(
+      top: false,
+      child: StreamBuilder<TrackPlayback>(
+        stream: widget.player.trackPlaybackStream,
+        initialData: widget.player.trackPlayback,
+        builder: (context, snapshot) => _buildBody(snapshot.requireData),
+      ),
+    );
+    if (widget.headerBuilder != null) {
+      return DesktopPageScope.active(context) ? Material(child: body) : Scaffold(body: body);
+    }
     return WorkspacePage(
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1038,34 +1075,35 @@ class _SongListPageState extends State<SongListPage> {
           ),
         const SizedBox(width: 4),
       ],
-      body: SafeArea(
-        top: false,
-        child: StreamBuilder<TrackPlayback>(
-          stream: widget.player.trackPlaybackStream,
-          initialData: widget.player.trackPlayback,
-          builder: (context, snapshot) => _buildBody(snapshot.requireData),
-        ),
-      ),
+      body: body,
     );
   }
 
   Widget _buildBody(TrackPlayback playback) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error case final error?) {
-      return _ErrorView(message: error, onRetry: _load);
-    }
-    final hasHeader = widget.cover.isNotEmpty || widget.description.isNotEmpty;
-    final hasFooter = _loadingMore || _moreFailed;
+    final status = _loading
+        ? const Center(child: CircularProgressIndicator())
+        : switch (_error) {
+            final error? => _ErrorView(message: error, onRetry: _load),
+            _ => null,
+          };
+    final headerBuilder = widget.headerBuilder;
+    if (headerBuilder == null && status != null) return status;
+    final hasHeader = headerBuilder != null || widget.cover.isNotEmpty || widget.description.isNotEmpty;
+    final playAll = status == null && _songs.isNotEmpty ? _playAll : null;
+    final insets = DesktopPageScope.bodyPadding(context, const EdgeInsets.fromLTRB(10, 4, 10, 16));
+    final hasFooter = status == null && (_loadingMore || _moreFailed);
     // 收藏列表里的红心变化会改变列表内容，需要重新读取。
     final reloadFavorites = widget.reloadOnFavoriteChange || widget.playlist?.isDefault == true;
     return Scrollbar(
       controller: _paginationScroll,
       child: ListView.builder(
         controller: _paginationScroll,
-        padding: DesktopPageScope.bodyPadding(context, const EdgeInsets.fromLTRB(10, 4, 10, 16)),
-        itemCount: _songs.length + (hasHeader ? 1 : 0) + (hasFooter ? 1 : 0),
+        padding: headerBuilder == null ? insets : EdgeInsets.only(bottom: insets.bottom),
+        itemCount: (status == null ? _songs.length : 1) +
+            (hasHeader ? 1 : 0) + (hasFooter ? 1 : 0),
         itemBuilder: (context, index) {
           if (hasHeader && index == 0) {
+            if (headerBuilder != null) return headerBuilder(context, playAll, _startingPlayback);
             return Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -1080,6 +1118,9 @@ class _SongListPageState extends State<SongListPage> {
                 ],
               ),
             );
+          }
+          if (status != null) {
+            return Padding(padding: const EdgeInsets.symmetric(vertical: 32), child: status);
           }
           final slot = index - (hasHeader ? 1 : 0);
           if (slot == _songs.length) {
@@ -1096,7 +1137,7 @@ class _SongListPageState extends State<SongListPage> {
           void details() => openCatalogHit(
             context, CatalogHit.track(song), SearchType.song, widget.library, widget.player,
           );
-          return SongTile(
+          final tile = SongTile(
             song: song,
             index: slot + 1,
             selected: selected,
@@ -1121,6 +1162,9 @@ class _SongListPageState extends State<SongListPage> {
               ],
             ),
           );
+          return headerBuilder == null
+              ? tile
+              : Padding(padding: insets.copyWith(top: 0, bottom: 0), child: tile);
         },
       ),
     );

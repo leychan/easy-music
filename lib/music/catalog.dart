@@ -20,8 +20,9 @@ CatalogSearchResult<List<T>> parseCatalogSearch<T>(
   T? Function(Map<String, dynamic>) parse, {
   required int page,
   required int pageSize,
+  String listKey = 'lists',
 }) {
-  final rows = data is Map ? data['lists'] : data;
+  final rows = data is Map ? data[listKey] : data;
   if (rows is! List || rows.isEmpty) return (hits: <T>[], hasMore: false);
   final total = data is Map ? int.tryParse('${data['total']}') : null;
   return (

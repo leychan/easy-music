@@ -121,7 +121,8 @@ extension KugouCatalogApi on KugouMusicApi {
     return songs;
   }
 
-  Future<List<Song>> artistTracks(String id) async {
+  Future<CatalogSearchResult<List<Song>>> artistTracksPage(String id, {required int page}) async {
+    const pageSize = 100;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final json = await client.post(
       Uri.parse('https://openapi.kugou.com/kmr/v1/audio_group/author'),
@@ -132,14 +133,17 @@ extension KugouCatalogApi on KugouMusicApi {
         'clienttime': now,
         'key': client.isLite ? KugouSignature.loginKey(now, lite: true) : KugouSignature.smsKey(now),
         'author_id': id,
-        'pagesize': 100,
-        'page': 1,
+        'pagesize': pageSize,
+        'page': page,
         'sort': 1,
         'area_code': 'all',
       },
       headers: {'x-router': 'openapi.kugou.com', 'kg-tid': '220'},
     );
-    return _tracks(_catalogData(json, '读取歌手作品'), 'audio');
+    return parseCatalogSearch(
+      _catalogData(json, '读取歌手作品'), Song.tryParse,
+      page: page, pageSize: pageSize, listKey: 'audio',
+    );
   }
 
   Future<List<Song>> freeListenSongs() async {
@@ -249,12 +253,17 @@ extension KugouCatalogApi on KugouMusicApi {
     final results = await searchCatalog(name, SearchType.artist);
     final artist = results.where((item) => item.title == name).firstOrNull;
     if (artist == null) return const [];
+    return artistImages(artist.id);
+  }
+
+  /// 已知歌手 ID 的页面可直接取大图，避免重复搜索和同名误配。
+  Future<List<String>> artistImages(String id) async {
     final response = await http
         .get(
           Uri.https('openapicdnretry.kugou.com', '/kmr/v1/author/extend', {
             'fields_pack': 'allimages',
             'authorimg_type': '2,3',
-            'entity_id': artist.id,
+            'entity_id': id,
           }),
         )
         .timeout(const Duration(seconds: 10));
@@ -271,15 +280,12 @@ extension KugouCatalogApi on KugouMusicApi {
     for (final photo in photos.whereType<Map>()) {
       final raw = photo['file'];
       if (raw is! String) continue;
-      final address = Uri.tryParse(raw.replaceAll('{size}', '800'));
-      if (address != null &&
-          (address.scheme == 'https' || address.scheme == 'http') &&
-          address.host.isNotEmpty &&
-          address.userInfo.isEmpty) {
-        urls.add(address.toString());
-      }
+      final address = resolveCoverUrl(raw, 800);
+      if (address.isNotEmpty) urls.add(address);
     }
-    return urls.take(5).toList();
+    // 接口可能改变返回顺序，先排序再截取，避免同一批照片换首图。
+    final ordered = urls.toList()..sort();
+    return List.unmodifiable(ordered.take(5));
   }
 
   Future<Uri> videoAddress(String hash) async {

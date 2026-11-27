@@ -52,6 +52,8 @@ class MusicLibrary extends ChangeNotifier {
   final _urlCache = <(String, int, AudioQuality), SongUrl>{};
   final _covers = <(bool, int), String>{};
   final _pendingCovers = <(bool, int), Future<Map<int, String>>>{};
+  final _artistImages = <String, List<String>>{};
+  final _pendingArtistImages = <String, Future<List<String>>>{};
   final _favoriteCommands = Lock();
   final _favoriteKeys = <String>{};
   final _favoriteRequests = <((int, String), String), Future<bool>>{};
@@ -124,8 +126,29 @@ class MusicLibrary extends ChangeNotifier {
       (await completeCovers(hits.map((hit) => hit.song).whereType<Song>().toList()))
           .map(CatalogHit.track).toList();
 
-  Future<List<Song>> artistTracks(String id) async =>
-      await api?.artistTracks(id) ?? const [];
+  Future<CatalogSearchResult<List<Song>>> artistTracksPage(String id, {required int page}) =>
+      _readyApi.artistTracksPage(id, page: page);
+
+  Future<List<String>> artistImages(String id) {
+    if (_artistImages[id] case final photos?) return SynchronousFuture(photos);
+    return _pendingArtistImages.putIfAbsent(id, () async {
+      try {
+        final photos = await api?.artistImages(id) ?? const [];
+        // 只缓存成功取到的照片，失败时用头像，下次打开可以重试。
+        if (!_disposed && photos.isNotEmpty) {
+          if (_artistImages.length >= _cacheLimit) {
+            _artistImages.remove(_artistImages.keys.first);
+          }
+          _artistImages[id] = photos;
+        }
+        return photos;
+      } on Exception {
+        return const [];
+      } finally {
+        _pendingArtistImages.remove(id);
+      }
+    });
+  }
 
   Future<List<Song>> albumTracks(String id, {bool purchased = false}) async =>
       await api?.albumTracks(id, purchased: purchased) ?? const [];

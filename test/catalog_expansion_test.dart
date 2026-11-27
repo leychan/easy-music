@@ -44,6 +44,63 @@ void main() {
     },
   };
 
+  test('歌手照片去重后按固定顺序选取，接口改变顺序时首图不变', () async {
+    final api = apiFor((_) => throw StateError('Unexpected catalog request'));
+    const filenames = ['f', 'a', 'e', 'c', 'd', 'b', 'a'];
+    var requestCount = 0;
+    await http.runWithClient(() async {
+      final first = await api.artistImages('17');
+      final second = await api.artistImages('17');
+      expect(first, [
+        for (final name in ['a', 'b', 'c', 'd', 'e'])
+          'https://imge.kugou.com/stdmusic/800/$name.jpg',
+      ]);
+      expect(second, first);
+      expect(requestCount, 2);
+    }, () => MockClient((request) async {
+      expect(request.url.queryParameters['entity_id'], '17');
+      final order = requestCount++ == 0 ? filenames : filenames.reversed;
+      return http.Response(jsonEncode({
+        'status': 1,
+        'data': [
+          {
+            'imgs': [
+              for (final name in order)
+                {'file': 'http://imge.kugou.com/stdmusic/{size}/$name.jpg'},
+              {'file': 'file:///missing.jpg'},
+            ],
+          },
+        ],
+      }), 200);
+    }));
+  });
+
+  test('歌手作品按请求页返回，并根据总数判断是否还有下一页', () async {
+    final api = apiFor((request) {
+      expect(request.url.path, '/kmr/v1/audio_group/author');
+      final body = jsonDecode(request.body) as Map;
+      final page = body['page'] as int;
+      expect(body['author_id'], '17');
+      expect(body['pagesize'], 100);
+      return {
+        'status': 1,
+        'data': {
+          'total': '101',
+          'audio': [
+            {'FileHash': 'SONG$page', 'SongName': '示例 $page', 'Audioid': page},
+          ],
+        },
+      };
+    });
+
+    final first = await api.artistTracksPage('17', page: 1);
+    final last = await api.artistTracksPage('17', page: 2);
+    expect(first.hits.single.id, 'kg:SONG1');
+    expect(last.hits.single.id, 'kg:SONG2');
+    expect(first.hasMore, isTrue);
+    expect(last.hasMore, isFalse);
+  });
+
   test('私人 FM 首批够用时只发一批，补批后也最多保留十首', () async {
     for (final firstBatchSize in [5, 12]) {
       final api = apiFor((request) {

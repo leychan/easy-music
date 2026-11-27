@@ -12,6 +12,7 @@ import 'package:easy_music/music/song.dart';
 import 'package:easy_music/player/playback.dart';
 import 'package:easy_music/player/session_store.dart';
 import 'package:easy_music/player/track.dart';
+import 'package:easy_music/ui/artist_page.dart';
 import 'package:easy_music/ui/cover.dart';
 import 'package:easy_music/ui/discover_page.dart';
 import 'package:easy_music/ui/mini_player_bar.dart';
@@ -70,6 +71,136 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
   }
+
+  testWidgets('播放页的歌名和歌手名均可打开歌手页，播放图标可播放整份列表', (tester) async {
+    tester.view
+      ..physicalSize = const Size(400, 840)
+      ..devicePixelRatio = 1
+      ..padding = const FakeViewPadding(top: 28)
+      ..viewPadding = const FakeViewPadding(top: 28);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    final store = SessionStore(':memory:');
+    final account = Account();
+    final player = _TestPlayer(store);
+    final library = _TestLibrary(account)
+      ..searchResults = {
+        (SearchType.artist, 1): [
+          const CatalogHit(id: '10', title: '相似歌手'),
+          const CatalogHit(id: '11', title: '示例歌手'),
+        ],
+      }
+      ..artistSongs = [_first, _second]
+      ..artistPhotos = ['https://example.org/a.jpg', 'https://example.org/b.jpg'];
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    addTearDown(library.dispose);
+    await player.playTracks([
+      Track(id: 'kg:PLAYING', title: '当前歌曲', artist: '示例歌手', source: Uri.parse(_url.url)),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(platform: TargetPlatform.android),
+      home: NowPlayingPage(player: player, library: library),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.descendant(
+      of: find.byTooltip('查看歌手'),
+      matching: find.byIcon(Icons.chevron_right_rounded),
+    ), findsNothing);
+
+    for (final text in ['当前歌曲', '示例歌手']) {
+      await tester.tap(find.text(text));
+      await tester.pumpAndSettle();
+      final page = find.byType(ArtistPage);
+      final artistName = find.descendant(of: page, matching: find.text('示例歌手'));
+      expect(page, findsOneWidget);
+      expect(artistName, findsOneWidget);
+      expect(find.text('歌手资料'), findsNothing);
+      expect(find.byType(SongTile), findsNWidgets(2));
+      expect(find.byTooltip('全部播放'), findsOneWidget);
+      expect(find.text('全部播放'), findsNothing);
+      expect(library.lastArtistId, '11');
+      final gallery = find.byType(PageView);
+      final photoBounds = tester.getRect(gallery);
+      final nameBounds = tester.getRect(artistName);
+      expect(photoBounds.top, 0);
+      expect(nameBounds.left - photoBounds.left, 20);
+      expect(photoBounds.bottom - nameBounds.bottom, 32);
+      expect(tester.getTopLeft(find.byType(AppBar)).dy, 28);
+      expect(tester.widget<AppBar>(find.byType(AppBar)).title, isNull);
+      final pages = tester.widget<PageView>(gallery).controller!;
+      expect(pages.page, 1);
+      if (text == '当前歌曲') {
+        await tester.drag(gallery, const Offset(300, 0));
+        await tester.pumpAndSettle();
+        expect(pages.page, 2);
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(pages.page, 1);
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        expect(pages.page, 2);
+        await tester.tap(find.descendant(of: page, matching: find.byType(BackButton)));
+        await tester.pumpAndSettle();
+      }
+    }
+
+    await tester.tap(find.byTooltip('全部播放'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ArtistPage), findsNothing);
+    expect(find.byType(NowPlayingPage), findsOneWidget);
+    expect(player.tracks.value.map((track) => track.id), [_first.id, _second.id]);
+  });
+
+  testWidgets('歌手歌曲滚动到底自动续页，失败后重试原页并去重', (tester) async {
+    final store = SessionStore(':memory:');
+    final account = Account();
+    final firstPage = [
+      for (var i = 1; i <= 20; i++) Song(hash: 'S$i', title: '首批歌曲 $i', albumAudioId: i),
+    ];
+    var failNext = true;
+    final library = _TestLibrary(account)
+      ..loadArtistPage = (page) {
+        if (page == 1) return (hits: firstPage, hasMore: true);
+        if (failNext) {
+          failNext = false;
+          throw const KugouFailure('暂时无法读取下一页');
+        }
+        return (hits: [firstPage.last, _second], hasMore: false);
+      };
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    addTearDown(library.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: ArtistPage(
+        name: '示例歌手',
+        artist: const CatalogHit(id: '11', title: '示例歌手'),
+        player: _TestPlayer(store),
+        library: library,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(library.requestedArtistPages, [1]);
+
+    final position = tester.state<ScrollableState>(find.byType(Scrollable)).position;
+    position.jumpTo(position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(library.requestedArtistPages, [1, 2]);
+    position.jumpTo(position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重试加载更多'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text(_second.title), 150);
+    await tester.pumpAndSettle();
+
+    expect(library.requestedArtistPages, [1, 2, 2]);
+    expect(find.text(firstPage.last.title), findsOneWidget);
+    expect(find.text(_second.title), findsOneWidget);
+    expect(find.text('重试加载更多'), findsNothing);
+  });
 
   testWidgets('点播打开播放页，返回时列表同步高亮、暂停和切歌', (tester) async {
     final (player, library) = await mount(tester, TargetPlatform.linux, [_first, _second]);
@@ -734,6 +865,21 @@ class _TestLibrary extends MusicLibrary {
   int? failedComplexPage;
   final searched = <(SearchType, int)>[];
   final complexPages = <int>[];
+  List<Song> artistSongs = const [];
+  List<String> artistPhotos = const [];
+  String? lastArtistId;
+  final requestedArtistPages = <int>[];
+  FutureOr<CatalogSearchResult<List<Song>>> Function(int page)? loadArtistPage;
+
+  @override
+  Future<CatalogSearchResult<List<Song>>> artistTracksPage(String id, {required int page}) async {
+    lastArtistId = id;
+    requestedArtistPages.add(page);
+    return loadArtistPage?.call(page) ?? (hits: artistSongs, hasMore: false);
+  }
+
+  @override
+  Future<List<String>> artistImages(String id) async => artistPhotos;
 
   @override
   Future<Uri> videoAddress(String hash) => loadVideoAddress?.call(hash) ?? super.videoAddress(hash);

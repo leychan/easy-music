@@ -12,6 +12,7 @@ import '../player/lyrics.dart';
 import '../player/playback.dart';
 import '../player/track.dart';
 import 'appearance.dart';
+import 'artist_page.dart';
 import 'favorite_button.dart';
 import 'lyrics_display.dart';
 import 'music_toast.dart';
@@ -151,6 +152,10 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
           final index = state.queueIndex;
           final track = index == null ? null : tracks.elementAtOrNull(index);
           final artist = track?.artist.trim() ?? '';
+          final artists = {
+            for (final name in artist.split('、').map((name) => name.trim()))
+              if (name.isNotEmpty && name != '未知歌手') name,
+          }.toList();
           final artwork = resolveCoverUrl(track?.artUri?.toString() ?? '', 480);
           return Theme(
             data: stageTheme,
@@ -170,6 +175,17 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
                             (_showLyrics ?? (!wide && widget.showLyrics));
                         void toggleLyrics() =>
                             setState(() => _showLyrics = !showLyrics);
+                        void openArtist() => openArtistFromPlayer(
+                          context,
+                          artists: artists,
+                          library: widget.library,
+                          player: player,
+                        );
+                        Widget artistLink(String text, TextStyle? style) => _ArtistLink(
+                          text: text,
+                          style: style,
+                          onTap: artists.isEmpty ? null : openArtist,
+                        );
                         return Column(
                           children: [
                             Padding(
@@ -195,11 +211,9 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
                                       builder: (context, heading) => Row(
                                         children: [
                                           Flexible(
-                                            child: Text(
+                                            child: artistLink(
                                               track?.title ?? '尚未选择音乐',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: stageTheme
+                                              stageTheme
                                                   .textTheme
                                                   .titleLarge
                                                   ?.copyWith(
@@ -218,12 +232,9 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
                                                   maxWidth:
                                                       heading.maxWidth / 3,
                                                 ),
-                                                child: Text(
+                                                child: artistLink(
                                                   artist,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: stageTheme
+                                                  stageTheme
                                                       .textTheme
                                                       .titleMedium
                                                       ?.copyWith(
@@ -402,6 +413,39 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
   void _showMessage(String message) {
     if (!mounted) return;
     showMusicNotice(context, message);
+  }
+}
+
+class _ArtistLink extends StatelessWidget {
+  const _ArtistLink({required this.text, required this.style, required this.onTap});
+
+  final String text;
+  final TextStyle? style;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+    if (onTap == null) return label;
+    return Tooltip(
+      message: '查看歌手',
+      excludeFromSemantics: true,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              widthFactor: 1,
+              child: label,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

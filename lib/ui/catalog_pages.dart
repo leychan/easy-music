@@ -5,6 +5,7 @@ import '../music/catalog.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
 import '../player/playback.dart';
+import 'artist_page.dart';
 import 'cover.dart';
 import 'discover_page.dart';
 import 'music_toast.dart';
@@ -29,11 +30,9 @@ Future<void> openCatalogHit(
         library: library,
         player: player,
       ),
-      SearchType.artist => SongListPage(
-        title: hit.title,
-        subtitle: hit.subtitle,
-        cover: hit.cover,
-        loader: () => library.artistTracks(hit.id),
+      SearchType.artist => ArtistPage(
+        name: hit.title,
+        artist: hit,
         library: library,
         player: player,
       ),
