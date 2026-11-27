@@ -13,9 +13,10 @@ class ImportTrack {
 }
 
 class ImportPreview {
-  const ImportPreview(this.title, this.tracks);
+  const ImportPreview(this.title, this.tracks, {this.format});
   final String title;
   final List<ImportTrack> tracks;
+  final String? format;
 }
 
 /// 只读取公开歌单的曲目信息，导入时在当前酷狗曲库里匹配。
@@ -26,64 +27,74 @@ class PublicPlaylistImport {
       'Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36';
 
   Future<ImportPreview> read(String text) async {
-    final url = Uri.tryParse(text.trim());
-    if (url == null ||
-        !const ['https', 'http'].contains(url.scheme) ||
-        url.userInfo.isNotEmpty) {
-      throw const KugouFailure('请输入公开歌单的完整链接。');
-    }
     final client = http.Client();
     try {
-      final host = url.host.toLowerCase();
-      bool from(String root) => host == root || host.endsWith('.$root');
-      final path = url.path;
-      final fragment = Uri.tryParse(url.fragment);
-      final query = {...?fragment?.queryParameters, ...url.queryParameters};
-      String id(List<String> names, RegExp pattern) {
-        for (final key in names) {
-          final value = query[key];
-          if (value != null && RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value)) {
-            return value;
-          }
-        }
-        return pattern.firstMatch(path)?[1] ?? '';
+      // 分享时通常会带上歌单名称和说明，只解析其中的公开链接。
+      final links = RegExp(r'''https?://[^\s<>"“”《》【】。，；！？]+''', caseSensitive: false);
+      final trailing = RegExp(r'''[)\]）』」,.;!?'’]+$''');
+      var hasLink = false;
+      for (final match in links.allMatches(text)) {
+        final url = Uri.tryParse(match[0]!.replaceFirst(trailing, ''));
+        if (url == null || url.host.isEmpty || url.userInfo.isNotEmpty) continue;
+        hasLink = true;
+        final preview = await _readUrl(client, url);
+        if (preview != null) return preview;
       }
-
-      if (from('kugou.com')) {
-        final gid = id([
-          'global_collection_id',
-          'global_specialid',
-        ], RegExp(r'/special/single/([a-zA-Z0-9_]+)\.html$'));
-        if (gid.isNotEmpty) {
-          final tracks = await _kugouTracks(
-            Playlist(globalCollectionId: gid, name: '酷狗歌单', listId: 0),
-          );
-          return ImportPreview('酷狗歌单', [
-            for (final song in tracks)
-              ImportTrack(song.title, song.artist, song: song),
-          ]);
-        }
-      } else if (from('music.163.com')) {
-        final source = id(['id'], RegExp(r'/playlist/(\d+)'));
-        if (_number(source)) return await _netease(client, source);
-      } else if (from('y.qq.com')) {
-        final source = id(['id', 'disstid'], RegExp(r'/playlist/(\d+)'));
-        if (_number(source)) return await _qq(client, source);
-      } else if (host == 'open.spotify.com') {
-        final source = id([], RegExp(r'/playlist/([a-zA-Z0-9]{22})(?:/|$)'));
-        if (source.isNotEmpty) return await _spotify(client, source);
-      } else if (from('kuwo.cn') || from('kuwo.com')) {
-        final source = id([
-          'pid',
-        ], RegExp(r'/(?:playlist_detail|play_detail|playlist)/(\d+)'));
-        if (_number(source)) return await _kuwo(client, source);
-      }
+      if (!hasLink) throw const KugouFailure('请粘贴包含公开歌单链接的分享文字或完整链接。');
       throw const KugouFailure('无法识别歌单链接。请使用酷狗、网易云、QQ 音乐、酷我或 Spotify 的公开歌单链接。');
     } on FormatException {
       throw const KugouFailure('来源平台返回的歌单格式无法读取。');
     } finally {
       client.close();
     }
+  }
+
+  Future<ImportPreview?> _readUrl(http.Client client, Uri url) async {
+    final host = url.host.toLowerCase();
+    bool from(String root) => host == root || host.endsWith('.$root');
+    final path = url.path;
+    final fragment = Uri.tryParse(url.fragment);
+    final query = {...?fragment?.queryParameters, ...url.queryParameters};
+    String id(List<String> names, RegExp pattern) {
+      for (final key in names) {
+        final value = query[key];
+        if (value != null && RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value)) {
+          return value;
+        }
+      }
+      return pattern.firstMatch(path)?[1] ?? '';
+    }
+
+    if (from('kugou.com')) {
+      final gid = id([
+        'global_collection_id',
+        'global_specialid',
+      ], RegExp(r'/special/single/([a-zA-Z0-9_]+)\.html$'));
+      if (gid.isNotEmpty) {
+        final tracks = await _kugouTracks(
+          Playlist(globalCollectionId: gid, name: '酷狗歌单', listId: 0),
+        );
+        return ImportPreview('酷狗歌单', [
+          for (final song in tracks)
+            ImportTrack(song.title, song.artist, song: song),
+        ]);
+      }
+    } else if (from('music.163.com')) {
+      final source = id(['id'], RegExp(r'/playlist/(\d+)'));
+      if (_number(source)) return await _netease(client, source);
+    } else if (from('y.qq.com')) {
+      final source = id(['id', 'disstid'], RegExp(r'/playlist/(\d+)'));
+      if (_number(source)) return await _qq(client, source);
+    } else if (host == 'open.spotify.com') {
+      final source = id([], RegExp(r'/playlist/([a-zA-Z0-9]{22})(?:/|$)'));
+      if (source.isNotEmpty) return await _spotify(client, source);
+    } else if (from('kuwo.cn') || from('kuwo.com')) {
+      final source = id([
+        'pid',
+      ], RegExp(r'/(?:playlist_detail|play_detail|playlist)/(\d+)'));
+      if (_number(source)) return await _kuwo(client, source);
+    }
+    return null;
   }
 
   static bool _number(String id) => RegExp(r'^\d+$').hasMatch(id);

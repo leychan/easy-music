@@ -1578,6 +1578,15 @@ void main() {
     addTearDown(tester.view.resetPadding);
     await mount(tester, TargetPlatform.android, const Size(390, 760),
       session: const KugouSession(userid: 47, token: 'playlist-test', nickname: '测试账号', avatar: ''),
+      respond: (request) {
+        if (request.url.path == '/v7/get_all_list') {
+          return {'status': 1, 'data': {'info': [
+            {'listid': 8, 'userid': 47, 'name': '我喜欢', 'is_def': 1},
+            {'listid': 9, 'userid': 47, 'name': '通勤歌单', 'song_count': 12},
+          ]}};
+        }
+        return null;
+      },
     );
     expect(find.byType(DesktopWorkspace), findsNothing);
     final navigation = find.byType(NavigationBar);
@@ -1609,6 +1618,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(MyPlaylistsPage), findsOneWidget);
     expect(find.byTooltip('新建歌单'), findsOneWidget);
+    expect(find.byTooltip('导入歌单'), findsOneWidget);
+    expect(find.byType(GridView), findsNothing);
+    final liked = find.widgetWithText(ListTile, '我喜欢');
+    final commute = find.widgetWithText(ListTile, '通勤歌单');
+    expect(tester.getTopLeft(liked).dx, tester.getTopLeft(commute).dx);
+    expect(tester.getTopLeft(liked).dy, lessThan(tester.getTopLeft(commute).dy));
+    expect((tester.widget<ListTile>(commute).leading as Cover).size, 52);
+    expect(find.descendant(of: commute, matching: find.text('12 首')), findsOneWidget);
+    final edit = find.byTooltip('编辑歌单');
+    expect(find.descendant(of: liked, matching: edit), findsNothing);
+    await tester.tap(find.descendant(of: commute, matching: edit));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AlertDialog, '编辑歌单'), findsOneWidget);
   });
 
   testWidgets('Android 我的喜欢打开收藏列表，取消收藏后刷新', (tester) async {

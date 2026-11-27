@@ -387,7 +387,7 @@ class MusicLibrary extends ChangeNotifier {
     String normalize(String input) =>
         input.toLowerCase().replaceAll(RegExp(r'[\s_\-·，,、]+'), '');
     final title = normalize(track.title);
-    final artists = track.artists.split(RegExp(r'[、,&/，]'))
+    final artists = track.artists.split(RegExp(r'[、,&/，;；]'))
         .map(normalize).where((name) => name.isNotEmpty).toSet();
     final results = await search('${track.title} ${track.artists}'.trim());
     return results.where((song) =>

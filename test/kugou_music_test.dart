@@ -598,6 +598,27 @@ void main() {
       expect(await empty.playlistSongs(playlist), isEmpty);
     });
 
+    test('默认收藏有零首歌且 info 为空时显示空歌单', () async {
+      const playlist = Playlist(
+        globalCollectionId: 'collection_3_42_1_0',
+        name: '默认收藏', listId: 1, userId: 42, isDefault: true,
+      );
+      var count = 0;
+      final client = clientReturning((_) => {
+        'status': 1,
+        'error_code': 0,
+        'data': {'count': count, 'info': null},
+      })..session = const KugouSession(
+        userid: 42, token: 'test-token', nickname: '', avatar: '',
+      );
+      final api = KugouMusicApi(client);
+      expect(await api.playlistSongs(playlist), isEmpty);
+      expect(requests.single.url.path, '/v4/get_list_all_file_v3');
+
+      count = 1;
+      await expectLater(api.playlistSongs(playlist), throwsA(isA<KugouFailure>()));
+    });
+
     test('未登录时不会去请求用户歌单', () async {
       final api = KugouMusicApi(clientReturning((_) => {}));
       expect(await api.userPlaylists(), isEmpty);

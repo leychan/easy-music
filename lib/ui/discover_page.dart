@@ -17,6 +17,7 @@ import 'now_playing.dart';
 import 'player_controls.dart' show runPlayerAction;
 import 'search_page.dart';
 import 'playlist_actions.dart';
+import 'playlist_list_tile.dart';
 import 'song_tile.dart';
 import 'workspace_page.dart';
 
@@ -1284,11 +1285,9 @@ class _RecommendedPlaylistsPageState extends State<RecommendedPlaylistsPage> {
                   itemCount: items.length,
                   itemBuilder: (context, index) {
                     final playlist = items[index];
-                    return ListTile(
-                      leading: Cover(url: playlist.cover, size: 52, radius: 8, icon: Icons.queue_music_rounded),
-                      title: Text(playlist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: playlist.creator.isEmpty ? null : Text(playlist.creator, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      trailing: const Icon(Icons.chevron_right_rounded),
+                    return PlaylistListTile(
+                      playlist: playlist,
+                      subtitle: playlist.creator.isEmpty ? null : playlist.creator,
                       onTap: () => _openRecommendedPlaylist(context, playlist, widget.library, widget.player),
                     );
                   },

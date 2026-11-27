@@ -684,6 +684,13 @@ class KugouMusicApi {
       for (final key in keys) json[key],
     ].whereType<List>().firstOrNull;
     if (tracks == null) {
+      // 空的云歌单可能返回 count: 0 和 info: null，而不是空数组。
+      if (json['status']?.toString() == '1' &&
+          data is Map &&
+          data['count']?.toString() == '0' &&
+          data['info'] == null) {
+        return const [];
+      }
       throw const KugouFailure('酷狗返回的歌单歌曲数据无法识别。');
     }
     final songs = tracks.map(Song.tryParse).whereType<Song>().toList();

@@ -603,18 +603,16 @@ class _EmptySearchHint extends StatelessWidget {
   }
 }
 
-/// 歌单卡片，供推荐页与「我的」页复用。
+/// 排行榜使用的歌单卡片。
 class PlaylistCard extends StatelessWidget {
   const PlaylistCard({
     super.key,
     required this.playlist,
     required this.onTap,
-    this.onEdit,
   });
 
   final Playlist playlist;
   final VoidCallback onTap;
-  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -629,22 +627,8 @@ class PlaylistCard extends StatelessWidget {
           children: [
             AspectRatio(
               aspectRatio: 1,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Cover(
-                    url: playlist.cover, radius: 12, icon: Icons.queue_music_rounded,
-                  ),
-                  if (onEdit case final edit?)
-                    Positioned(
-                      right: 4, top: 4,
-                      child: IconButton.filledTonal(
-                        onPressed: edit,
-                        tooltip: '编辑歌单',
-                        icon: const Icon(Icons.edit_outlined, size: 18),
-                      ),
-                    ),
-                ],
+              child: Cover(
+                url: playlist.cover, radius: 12, icon: Icons.queue_music_rounded,
               ),
             ),
             const SizedBox(height: 8),

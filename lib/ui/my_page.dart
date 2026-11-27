@@ -11,9 +11,9 @@ import 'cover.dart';
 import 'discover_page.dart';
 import 'history_page.dart';
 import 'import_page.dart';
-import 'playlist_actions.dart';
 import 'personal_music_page.dart';
-import 'search_page.dart';
+import 'playlist_actions.dart';
+import 'playlist_list_tile.dart';
 import 'settings_page.dart';
 import 'workspace_page.dart';
 
@@ -267,8 +267,13 @@ class _MyPlaylistsPageState extends State<MyPlaylistsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final signedIn = widget.account.session != null;
+    final status = signedIn
+        ? _playlistStatus(Theme.of(context))
+        : Padding(
+            padding: const EdgeInsets.only(top: 24),
+            child: _SignInPrompt(onTap: _openAccount),
+          );
     return WorkspacePage(
       title: const Text('我的歌单'),
       actions: [
@@ -295,68 +300,57 @@ class _MyPlaylistsPageState extends State<MyPlaylistsPage> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _load,
-          child: ListView(
+          child: ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: DesktopPageScope.bodyPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 24)),
-            children: signedIn ? _playlistItems(theme) : [
-              Padding(
-                padding: const EdgeInsets.only(top: 24),
-                child: _SignInPrompt(onTap: _openAccount),
-              ),
-            ],
+            padding: DesktopPageScope.bodyPadding(context, const EdgeInsets.fromLTRB(16, 0, 16, 20)),
+            itemCount: status == null ? _playlists.length : 1,
+            itemBuilder: (context, index) {
+              if (status != null) return status;
+              final playlist = _playlists[index];
+              return PlaylistListTile(
+                playlist: playlist,
+                subtitle: playlist.songCount > 0 ? '${playlist.songCount} 首' : null,
+                onTap: () => _openPlaylist(playlist),
+                onEdit: !playlist.isDefault && widget.library.canEditPlaylist(playlist)
+                    ? () => _editPlaylist(playlist)
+                    : null,
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  List<Widget> _playlistItems(ThemeData theme) => [
-      if (_loading)
-        const Padding(
-          padding: EdgeInsets.all(32),
-          child: Center(child: CircularProgressIndicator()),
-        )
-      else if (_error case final error?)
-        Column(
-          children: [
-            const SizedBox(height: 16),
-            Text(error, textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            FilledButton.tonal(onPressed: _load, child: const Text('重试')),
-          ],
-        )
-      else if (_playlists.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 32),
-          child: Text(
-            '这个账号还没有歌单。点击「新建歌单」开始。',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        )
-      else
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 180,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 0.72,
-          ),
-          itemCount: _playlists.length,
-          itemBuilder: (context, index) => PlaylistCard(
-            playlist: _playlists[index],
-            onTap: () => _openPlaylist(_playlists[index]),
-            onEdit: widget.library.canEditPlaylist(_playlists[index]) &&
-                !_playlists[index].isDefault
-                ? () => _editPlaylist(_playlists[index])
-                : null,
-          ),
+  Widget? _playlistStatus(ThemeData theme) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.all(32),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_error case final error?) {
+      return Column(
+        children: [
+          const SizedBox(height: 16),
+          Text(error, textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          FilledButton.tonal(onPressed: _load, child: const Text('重试')),
+        ],
+      );
+    }
+    if (_playlists.isNotEmpty) return null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Text(
+        '这个账号还没有歌单。点击「新建歌单」开始。',
+        textAlign: TextAlign.center,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
         ),
-  ];
+      ),
+    );
+  }
 }
 
 class _AccountCard extends StatelessWidget {
