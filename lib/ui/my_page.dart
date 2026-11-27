@@ -77,7 +77,6 @@ class MyPage extends StatelessWidget {
     listenable: account,
     builder: (context, _) {
       final session = account.session;
-      final desktop = DesktopPageScope.active(context);
       final Widget body;
       if (account.loading || session == null) {
         // 在悬浮底栏上方的可见区域居中，小屏或大字号时仍可滚动。
@@ -88,14 +87,7 @@ class MyPage extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 20),
               child: account.loading
                   ? const CircularProgressIndicator()
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _SignInPrompt(onTap: () => _openAccount(context), label: '立即登录'),
-                        // 桌面外观等本地设置在登录前也需要可用。
-                        if (desktop) _settingsTile(context),
-                      ],
-                    ),
+                  : _SignInPrompt(onTap: () => _openAccount(context), label: '立即登录'),
             ),
           ),
         );
@@ -103,7 +95,7 @@ class MyPage extends StatelessWidget {
         body = ListView(
           padding: pageScrollPadding(
             context,
-            DesktopPageScope.bodyPadding(context, const EdgeInsets.fromLTRB(20, 16, 20, 24)),
+            const EdgeInsets.fromLTRB(20, 16, 20, 24),
           ),
           children: [
             _AccountCard(account: account, onTap: () => _openAccount(context)),
@@ -151,9 +143,7 @@ class MyPage extends StatelessWidget {
           ],
         );
       }
-      return desktop
-          ? WorkspacePage(title: const Text('我的'), body: body)
-          : body;
+      return body;
     },
   );
 }

@@ -74,13 +74,29 @@ static GVariant* tray_property(GDBusConnection*, const gchar*, const gchar*,
   return nullptr;
 }
 
+static void present_main_window(MyApplication* self) {
+  GtkWindow* window = self->main_window;
+  if (window == nullptr || self->quitting) return;
+  if (gtk_widget_get_visible(GTK_WIDGET(window))) {
+    gtk_window_present(window);
+    return;
+  }
+
+  // Wayland 隐藏窗口后会销毁它的绘图表面。先恢复外层窗口，再映射
+  // Flutter 视图，渲染器才能把画面接到新表面上，播放状态也得以保留。
+  GtkWidget* view = gtk_bin_get_child(GTK_BIN(window));
+  gtk_widget_hide(view);
+  gtk_window_present(window);
+  gtk_widget_show(view);
+  gtk_widget_grab_focus(view);
+}
+
 static void tray_method(GDBusConnection*, const gchar*, const gchar*,
                         const gchar*, const gchar* name, GVariant* parameters,
                         GDBusMethodInvocation* invocation, gpointer data) {
   MyApplication* self = MY_APPLICATION(data);
-  if ((g_str_equal(name, "Activate") || g_str_equal(name, "ContextMenu")) &&
-      self->main_window != nullptr) {
-    gtk_window_present(self->main_window);
+  if (g_str_equal(name, "Activate") || g_str_equal(name, "ContextMenu")) {
+    present_main_window(self);
   } else if (g_str_equal(name, "SecondaryActivate") &&
              self->desktop_channel != nullptr) {
     fl_method_channel_invoke_method(self->desktop_channel, "trayPlayPause",
@@ -211,7 +227,7 @@ static void tray_watcher_vanished(GDBusConnection*, const gchar*, gpointer data)
   MyApplication* self = MY_APPLICATION(data);
   if (self->tray_registered && self->main_window != nullptr &&
       !gtk_widget_get_visible(GTK_WIDGET(self->main_window))) {
-    gtk_window_present(self->main_window);
+    present_main_window(self);
   }
   self->tray_registered = FALSE;
 }
@@ -339,7 +355,7 @@ static void my_application_activate(GApplication* application) {
 
   // Reuse the player window so two processes cannot update the same queue.
   if (self->main_window != nullptr) {
-    gtk_window_present(self->main_window);
+    present_main_window(self);
     return;
   }
 

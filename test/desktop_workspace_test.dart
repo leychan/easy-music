@@ -275,6 +275,12 @@ void main() {
     );
     expect(find.byType(DesktopWorkspace), findsOneWidget);
     expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byTooltip('私人 FM'), findsNothing);
+    final likedPosition = tester.getCenter(find.byTooltip('我喜欢'));
+    final discoverPosition = tester.getCenter(find.byTooltip('发现'));
+    expect(likedPosition.dx, discoverPosition.dx);
+    expect(likedPosition.dy, greaterThan(discoverPosition.dy));
+    expect(likedPosition.dy, tester.getCenter(find.byTooltip('排行榜')).dy);
     expect(find.text('发现音乐'), findsOneWidget);
     final headingOrigin = tester.getTopLeft(find.text('发现音乐'));
     expect(find.text('Easy Music'), findsNothing);
@@ -524,6 +530,10 @@ void main() {
     expect(find.byTooltip('移除云盘文件'), findsOneWidget);
     expect(find.byType(DesktopPlayerBar), findsOneWidget);
     expect(loads, 2);
+
+    await tester.tap(find.text('已购音乐'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(WorkspaceHeading, '已购音乐'), findsOneWidget);
   });
 
   testWidgets('侧栏切换与右侧详情返回时，侧栏和播放栏一直可用', (tester) async {
@@ -553,17 +563,12 @@ void main() {
     await tester.tap(find.byTooltip('听歌统计'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('免费听'), findsNothing);
-    await tester.tap(find.byTooltip('私人 FM'));
-    await tester.pumpAndSettle();
-    expect(find.byType(SongListPage), findsOneWidget);
-    expect(find.text('还没有播放记录。'), findsNothing);
-    expect(find.text('听歌统计'), findsNothing);
-    expect(desktopSearch, findsNothing);
-    expectWorkspace();
-
     await tester.tap(find.byTooltip('排行榜'));
     await tester.pumpAndSettle();
     expect(find.byType(RankingsPage), findsOneWidget);
+    expect(find.text('还没有播放记录。'), findsNothing);
+    expect(find.text('听歌统计'), findsNothing);
+    expect(desktopSearch, findsNothing);
     expectWorkspace();
 
     await tester.tap(find.byTooltip('搜索'));
@@ -604,6 +609,24 @@ void main() {
     expect(find.byType(DesktopWorkspace), findsOneWidget);
     expect(find.byTooltip('打开播放队列'), findsOneWidget);
     expectPlaybackBarOrder(tester, title);
+    expect(find.byTooltip('我的'), findsNothing);
+    final settings = find.byTooltip('设置');
+    await tester.scrollUntilVisible(
+      settings, 100,
+      scrollable: find.ancestor(
+        of: find.byTooltip('音乐云盘'), matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(settings.hitTestable(), findsOneWidget);
+    expect(
+      tester.getCenter(settings).dy,
+      greaterThan(tester.getCenter(find.byTooltip('我的歌单')).dy),
+    );
+    await tester.tap(settings);
+    await tester.pumpAndSettle();
+    expect(find.text('音频缓存'), findsOneWidget);
+    expect(find.byType(DesktopPlayerBar), findsOneWidget);
     await tester.tap(find.byTooltip('更多播放选项'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('音量'));
@@ -713,7 +736,7 @@ void main() {
     expect(playerHeart('取消收藏'), findsOneWidget);
     expect(find.byTooltip('取消收藏'), findsNWidgets(2));
 
-    await tester.tap(find.text('我喜欢').first);
+    await tester.tap(find.byTooltip('我喜欢'));
     await tester.pumpAndSettle();
     final list = find.byType(SongListPage);
     expect(find.descendant(of: list, matching: find.text('推荐歌曲甲')), findsOneWidget);
@@ -830,7 +853,7 @@ void main() {
         },
       );
       Finder tab(String label) => desktop
-          ? (label == '我的' ? find.text(label) : find.byTooltip(label))
+          ? (label == '设置' ? find.text(label) : find.byTooltip(label))
           : find.widgetWithText(NavigationDestination, label);
       final page = find.byType(SearchPage);
       final input = desktop ? desktopSearch : find.descendant(of: page, matching: find.byType(TextField));
@@ -850,7 +873,7 @@ void main() {
       expect(scroll.offset, 440);
       expect(requests.where((url) => url.path == songRoute), hasLength(1));
 
-      for (final label in ['发现', '我的', if (!desktop) '队列']) {
+      for (final label in ['发现', desktop ? '设置' : '我的', if (!desktop) '队列']) {
         await tester.tap(tab(label));
         await tester.pumpAndSettle();
         expect(page, findsNothing);
@@ -899,13 +922,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.state(discover), same(discoverState));
 
-    await tester.tap(find.text('我的'));
-    await tester.pumpAndSettle();
-    expect(find.text('签到领 VIP'), findsNothing);
-    final settings = find.widgetWithText(ListTile, '设置');
-    await tester.ensureVisible(settings);
-    await tester.pumpAndSettle();
-    await tester.tap(settings);
+    expect(find.text('我的'), findsNothing);
+    expect(find.text('设置'), findsOneWidget);
+    await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     expect(find.text('外观'), findsOneWidget);
     await tester.tap(find.byTooltip('发现'));
@@ -923,7 +942,7 @@ void main() {
     expect([calls(fmRoute), calls(dailyRoute), calls(playlistsRoute)], [1, 2, 1]);
     expect(find.text('桌面 FM 1'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('私人 FM'));
+    await tester.tap(viewAll('私人 FM'));
     await tester.pumpAndSettle();
     final fm = find.byType(SongListPage);
     final scrollable = find.descendant(of: fm, matching: find.byType(Scrollable));

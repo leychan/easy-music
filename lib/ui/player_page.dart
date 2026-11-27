@@ -366,24 +366,28 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         window.width >= 640 && window.height >= 400) {
       return ValueListenableBuilder(
         valueListenable: _section,
-        builder: (context, section, _) => DesktopWorkspace(
-          account: _account,
-          library: _library,
-          player: player,
-          section: section,
-          discover: _buildSection(
-            AppSection.discover, desktop: true, active: section == AppSection.discover,
-          ),
-          search: _searchOpened ? _buildSection(AppSection.search, desktop: true) : null,
-          content: section == AppSection.mine ? _buildSection(section, desktop: true) : null,
-          queue: _queuePanel(),
-          sidebarActions: [_addMusicMenu(), if (Platform.isLinux) _desktopMenu()],
-          onSelect: _selectSection,
-          onSearch: (keyword) {
-            _desktopSearch.value = (keyword: keyword, revision: (_desktopSearch.value?.revision ?? 0) + 1);
-            _selectSection(AppSection.search);
-          },
-        ),
+        builder: (context, selected, _) {
+          // 从窄窗的底栏布局切回桌面时，「我的」对应到发现页。
+          final section = selected == AppSection.mine ? AppSection.discover : selected;
+          return DesktopWorkspace(
+            account: _account,
+            library: _library,
+            player: player,
+            appearance: widget.appearance,
+            section: section,
+            discover: _buildSection(
+              AppSection.discover, desktop: true, active: section == AppSection.discover,
+            ),
+            search: _searchOpened ? _buildSection(AppSection.search, desktop: true) : null,
+            queue: _queuePanel(),
+            sidebarActions: [_addMusicMenu(), if (Platform.isLinux) _desktopMenu()],
+            onSelect: _selectSection,
+            onSearch: (keyword) {
+              _desktopSearch.value = (keyword: keyword, revision: (_desktopSearch.value?.revision ?? 0) + 1);
+              _selectSection(AppSection.search);
+            },
+          );
+        },
       );
     }
     return _buildBody(MiniPlayerBar(

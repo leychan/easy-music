@@ -5,6 +5,7 @@ import '../account/account_page.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
 import '../player/playback.dart';
+import 'appearance.dart';
 import 'cover.dart';
 import 'discover_page.dart';
 import 'glass_tabs.dart';
@@ -13,11 +14,12 @@ import 'my_page.dart';
 import 'now_playing.dart';
 import 'personal_music_page.dart';
 import 'desktop_player_bar.dart';
+import 'settings_page.dart';
 import 'workspace_page.dart';
 
 enum AppSection { discover, search, mine }
 
-enum _SidebarPage { account, fm, ranks, liked, cloud, history, recommended, playlists }
+enum _SidebarPage { account, ranks, liked, cloud, purchased, history, recommended, playlists, settings }
 
 class DesktopWorkspace extends StatefulWidget {
   const DesktopWorkspace({
@@ -28,20 +30,20 @@ class DesktopWorkspace extends StatefulWidget {
     required this.section,
     required this.discover,
     required this.search,
-    required this.content,
     required this.queue,
     required this.sidebarActions,
     required this.onSelect,
     required this.onSearch,
+    this.appearance,
   });
 
   final Account account;
   final MusicLibrary library;
   final Playback player;
+  final Appearance? appearance;
   final AppSection section;
   final Widget discover;
   final Widget? search;
-  final Widget? content;
   final Widget queue;
   final List<Widget> sidebarActions;
   final ValueChanged<AppSection> onSelect;
@@ -189,7 +191,6 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                       ),
                     ),
                   ),
-                ?widget.content,
               ],
             ),
           ),
@@ -248,18 +249,6 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
     );
   }
 
-  void _openFm() => _open(
-    _SidebarPage.fm,
-    SongListPage(
-      title: '私人 FM',
-      loader: widget.library.startupFmSongs,
-      loadMore: widget.library.appendStartupFmSongs,
-      privateFm: true,
-      library: widget.library,
-      player: widget.player,
-    ),
-  );
-
   void _liked() {
     final liked = widget.library.likedPlaylist(_playlists);
     if (liked != null) {
@@ -271,16 +260,16 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
     }
   }
 
-  void _cloud() {
+  void _openPersonalMusic({required bool cloud}) {
     if (_userid == null) {
       _openAccount();
     } else {
       _open(
-        _SidebarPage.cloud,
+        cloud ? _SidebarPage.cloud : _SidebarPage.purchased,
         PersonalMusicPage(
           library: widget.library,
           player: widget.player,
-          cloud: true,
+          cloud: cloud,
         ),
       );
     }
@@ -533,8 +522,18 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
               _quickNavigation(context, compact),
               const SizedBox(height: 12),
               for (final (icon, title, active, callback) in [
-                (Icons.favorite_border_rounded, '我喜欢', _sidebarPage?.destination == _SidebarPage.liked, _liked),
-                (Icons.cloud_outlined, '音乐云盘', _sidebarPage?.destination == _SidebarPage.cloud, _cloud),
+                (
+                  Icons.cloud_outlined,
+                  '音乐云盘',
+                  _sidebarPage?.destination == _SidebarPage.cloud,
+                  () => _openPersonalMusic(cloud: true),
+                ),
+                (
+                  Icons.shopping_bag_outlined,
+                  '已购音乐',
+                  _sidebarPage?.destination == _SidebarPage.purchased,
+                  () => _openPersonalMusic(cloud: false),
+                ),
                 (
                   Icons.history_rounded,
                   '最近播放',
@@ -557,16 +556,23 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                   ),
                 ),
                 (
-                  Icons.person_outline_rounded,
-                  '我的',
-                  _sidebarPage == null && widget.section == AppSection.mine,
-                  () => _selectSection(AppSection.mine),
-                ),
-                (
                   Icons.playlist_play_rounded,
                   '我的歌单',
                   _sidebarPage?.destination == _SidebarPage.playlists,
                   _openMyPlaylists,
+                ),
+                (
+                  Icons.settings_outlined,
+                  '设置',
+                  _sidebarPage?.destination == _SidebarPage.settings,
+                  () => _open(
+                    _SidebarPage.settings,
+                    SettingsPage(
+                      account: widget.account,
+                      player: widget.player,
+                      appearance: widget.appearance,
+                    ),
+                  ),
                 ),
               ])
                 _SidebarItem(
@@ -624,10 +630,10 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
             _selectSearch,
           ),
           (
-            Icons.radio_rounded,
-            '私人 FM',
-            _sidebarPage?.destination == _SidebarPage.fm,
-            _openFm,
+            Icons.favorite_border_rounded,
+            '我喜欢',
+            _sidebarPage?.destination == _SidebarPage.liked,
+            _liked,
           ),
           (
             Icons.bar_chart_rounded,
