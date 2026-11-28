@@ -1348,7 +1348,7 @@ void main() {
     const title = '队列测试歌曲';
     const artist = '测试歌手';
     const firstLine = '第 1 行歌词';
-    await mount(tester, TargetPlatform.android, const Size(390, 760),
+    final player = await mount(tester, TargetPlatform.android, const Size(390, 760),
       initialTrack: Track(
         id: 'kg:A1', title: title, artist: artist,
         audioQuality: AudioQuality.high,
@@ -1451,6 +1451,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('高品（320 kbps）'), findsOneWidget);
     await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    final track = player.tracks.value.single;
+    for (final (level, icon) in const [
+      (AudioQuality.standard, Icons.music_note_outlined),
+      (AudioQuality.lossless, Icons.album_outlined),
+      (AudioQuality.hifi, Icons.hd_outlined),
+    ]) {
+      player.tracks.value = [track.copyWith(audioQuality: level)];
+      await tester.pumpAndSettle();
+      final displayed = find.descendant(of: quality, matching: find.byIcon(icon));
+      expect(tester.widget<Icon>(displayed).semanticLabel, level.label);
+      expect(find.descendant(of: quality, matching: find.text(level.label)), findsNothing);
+    }
+    player.tracks.value = [track];
     await tester.pumpAndSettle();
 
     for (final (current, next) in const [

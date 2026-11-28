@@ -156,6 +156,19 @@ class QualityButton extends StatefulWidget {
 class _QualityButtonState extends State<QualityButton> {
   bool _busy = false;
 
+  // 以当前音源的实际档位为准，首选档位仍在菜单中标出。
+  Widget get _qualityIcon {
+    final quality = widget.track?.audioQuality;
+    final icon = switch (quality) {
+      AudioQuality.standard => Icons.music_note_outlined,
+      AudioQuality.high => Icons.high_quality_outlined,
+      AudioQuality.lossless => Icons.album_outlined,
+      AudioQuality.hifi => Icons.hd_outlined,
+      null => Icons.equalizer_rounded,
+    };
+    return Icon(icon, semanticLabel: quality?.label ?? '音质');
+  }
+
   Future<void> _select(AudioQuality quality) async {
     setState(() => _busy = true);
     try {
@@ -186,23 +199,12 @@ class _QualityButtonState extends State<QualityButton> {
       ],
       child: Padding(
         padding: const EdgeInsets.all(12),
-        // 按实际播放的音质显示图标，避免降档时仍显示 HQ。
         child: _busy
             ? const SizedBox.square(
                 dimension: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : switch (widget.track?.audioQuality) {
-                AudioQuality.high => const Icon(
-                    Icons.high_quality_outlined,
-                    semanticLabel: '高品',
-                  ),
-                final quality => Text(
-                    quality?.label ?? '音质',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              },
+            : _qualityIcon,
       ),
     ),
   );
