@@ -213,11 +213,17 @@ class _SpinningCover extends StatefulWidget {
 }
 
 class _SpinningCoverState extends State<_SpinningCover>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final _turns = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 18),
   );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void didChangeDependencies() {
@@ -231,9 +237,18 @@ class _SpinningCoverState extends State<_SpinningCover>
     if (oldWidget.spinning != widget.spinning) _updateRotation();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => _updateRotation();
+
   void _updateRotation() {
+    // Android 进入多任务界面时会先失去焦点，这时就可以停下封面动画。
+    final inForeground =
+        Theme.of(context).platform != TargetPlatform.android ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     final spinning =
-        widget.spinning && !MediaQuery.disableAnimationsOf(context);
+        widget.spinning &&
+        inForeground &&
+        !MediaQuery.disableAnimationsOf(context);
     // 暂停时保留角度，继续播放后从原处接着转。
     if (spinning && !_turns.isAnimating) _turns.repeat();
     if (!spinning && _turns.isAnimating) _turns.stop();
@@ -241,6 +256,7 @@ class _SpinningCoverState extends State<_SpinningCover>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _turns.dispose();
     super.dispose();
   }

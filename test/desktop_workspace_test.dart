@@ -1747,6 +1747,7 @@ void main() {
   });
 
   testWidgets('Android 双区玻璃播放条跨标签保留封面旋转状态', (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     final player = await mount(tester, TargetPlatform.android, const Size(390, 760));
     final bar = find.byType(MiniPlayerBar);
     final panels = find.descendant(of: bar, matching: find.byType(GlassSurface));
@@ -1780,6 +1781,18 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
       expect(angle(), greaterThan(previous));
     }
+
+    // 系统多任务切换先发来 inactive，音乐继续播放，封面停在原角度。
+    final beforeRecents = angle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(angle(), beforeRecents);
+    expect(player.playbackState.value.playing, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(angle(), beforeRecents);
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(angle(), greaterThan(beforeRecents));
 
     setPlaying(false);
     await tester.pump();
