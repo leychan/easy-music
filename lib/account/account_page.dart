@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
+import '../ui/app_dialog.dart';
 import '../ui/workspace_page.dart';
 import 'account.dart';
 import 'kugou/kugou_auth.dart';
@@ -22,7 +23,7 @@ class AccountPage extends StatelessWidget {
   Future<void> _confirmSignOut(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => AppDialog(
         title: const Text('退出登录？'),
         content: const Text('将清除本机保存的酷狗登录凭证，下次使用需要重新登录。'),
         actions: [

@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import '../player/playback.dart';
 import '../player/stem_mixer.dart';
 import '../player/track.dart';
+import 'diffuse_menu.dart';
 import 'music_toast.dart';
 
 class StemMixButton extends StatelessWidget {
@@ -27,11 +28,10 @@ class StemMixButton extends StatelessWidget {
           Icons.tune_rounded,
           color: Theme.of(context).colorScheme.primary,
         ),
-        onPressed: () => showModalBottomSheet<void>(
+        onPressed: () => showDiffuseMenuSheet<void>(
           context: context,
           useSafeArea: true,
           isScrollControlled: true,
-          showDragHandle: true,
           builder: (_) =>
               _StemMixPanel(player: player, mixer: mixer, track: track),
         ),

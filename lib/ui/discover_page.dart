@@ -9,6 +9,7 @@ import '../music/kugou_music_api.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
 import '../player/playback.dart';
+import 'app_background.dart';
 import 'catalog_pages.dart';
 import 'cover.dart';
 import 'favorite_button.dart';
@@ -1061,7 +1062,9 @@ class _SongListPageState extends State<SongListPage> {
       ),
     );
     if (widget.headerBuilder != null) {
-      return DesktopPageScope.active(context) ? Material(child: body) : Scaffold(body: body);
+      return DesktopPageScope.active(context)
+          ? Material(type: MaterialType.transparency, child: body)
+          : AppBackground(child: Scaffold(backgroundColor: Colors.transparent, body: body));
     }
     return WorkspacePage(
       title: Column(

@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'app_background.dart';
+
 /// 把底部避让空间放进滚动内容，让页面本身可以延伸到悬浮栏下。
 EdgeInsets pageScrollPadding(BuildContext context, EdgeInsets padding) =>
     padding.copyWith(bottom: padding.bottom + MediaQuery.paddingOf(context).bottom);
@@ -106,7 +108,13 @@ class WorkspacePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!DesktopPageScope.active(context)) {
-      return Scaffold(appBar: AppBar(title: title, actions: actions), body: body);
+      return AppBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: title, actions: actions, forceMaterialTransparency: true),
+          body: body,
+        ),
+      );
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),

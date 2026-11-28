@@ -2,6 +2,8 @@ import 'package:audio_service/audio_service.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../player/playback.dart';
+import 'app_dialog.dart';
+import 'diffuse_menu.dart';
 import 'music_toast.dart';
 import 'playback_options.dart' show playbackFadeOptions;
 
@@ -192,7 +194,7 @@ class PlayerControls extends StatelessWidget {
                       ),
                       ValueListenableBuilder(
                         valueListenable: player.fadeMilliseconds,
-                        builder: (context, current, _) => PopupMenuButton<int>(
+                        builder: (context, current, _) => DiffuseMenuButton<int>(
                           tooltip: '播放淡入淡出',
                           icon: const Icon(Icons.graphic_eq_rounded),
                           onSelected: (value) => runPlayerAction(
@@ -201,7 +203,7 @@ class PlayerControls extends StatelessWidget {
                           ),
                           itemBuilder: (_) => [
                             for (final (value, label) in playbackFadeOptions)
-                              CheckedPopupMenuItem(
+                              DiffuseMenuItem(
                                 value: value,
                                 checked: current == value,
                                 child: Text(label),
@@ -250,12 +252,12 @@ class PlaybackSpeedButton extends StatelessWidget {
   final double speed;
 
   @override
-  Widget build(BuildContext context) => PopupMenuButton<double>(
+  Widget build(BuildContext context) => DiffuseMenuButton<double>(
     tooltip: '播放速度',
     onSelected: (value) => runPlayerAction(context, () => player.setSpeed(value)),
     itemBuilder: (context) => [
       for (final value in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
-        CheckedPopupMenuItem(
+        DiffuseMenuItem(
           value: value,
           checked: speed == value,
           child: Text('$value×'),
@@ -317,7 +319,7 @@ class _PlaybackOptions extends StatelessWidget {
                   icon: const Icon(Icons.volume_up_outlined),
                   onPressed: () => showDialog<void>(
                     context: context,
-                    builder: (_) => AlertDialog(
+                    builder: (_) => AppDialog(
                       title: const Text('播放器音量'),
                       content: volume,
                     ),

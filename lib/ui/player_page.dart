@@ -16,9 +16,12 @@ import '../player/lyrics.dart';
 import '../player/playback.dart';
 import '../player/session_store.dart';
 import '../player/track.dart';
+import 'app_background.dart';
+import 'app_dialog.dart';
 import 'appearance.dart';
 import 'cover.dart';
 import 'desktop_workspace.dart';
+import 'diffuse_menu.dart';
 import 'discover_page.dart';
 import 'external_actions.dart';
 import 'glass_tabs.dart';
@@ -394,31 +397,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return _buildBody();
   }
 
-  Widget _addMusicMenu() => PopupMenuButton<String>(
+  Widget _addMusicMenu() => DiffuseMenuButton<String>(
     tooltip: '添加音乐',
     icon: const Icon(Icons.add_rounded),
     onSelected: (value) => value == 'local' ? _pickAudio() : _addLink(),
     itemBuilder: (_) => const [
-      PopupMenuItem(
+      DiffuseMenuItem(
         value: 'local',
-        child: ListTile(
-          leading: Icon(Icons.library_music_outlined),
-          title: Text('本地音乐'),
-          contentPadding: EdgeInsets.zero,
-        ),
+        leadingIcon: Icon(Icons.library_music_outlined),
+        child: Text('本地音乐'),
       ),
-      PopupMenuItem(
+      DiffuseMenuItem(
         value: 'link',
-        child: ListTile(
-          leading: Icon(Icons.add_link_rounded),
-          title: Text('音频链接'),
-          contentPadding: EdgeInsets.zero,
-        ),
+        leadingIcon: Icon(Icons.add_link_rounded),
+        child: Text('音频链接'),
       ),
     ],
   );
 
-  Widget _desktopMenu() => PopupMenuButton<_DesktopAction>(
+  Widget _desktopMenu() => DiffuseMenuButton<_DesktopAction>(
     tooltip: '桌面播放',
     onSelected: (action) => switch (action) {
       _DesktopAction.mini => _setMini(true),
@@ -435,9 +432,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     ],
   );
 
-  PopupMenuItem<_DesktopAction> _desktopMenuItem(
+  DiffuseMenuItem<_DesktopAction> _desktopMenuItem(
     _DesktopAction action, IconData icon, String label, {bool? checked}
-  ) => PopupMenuItem(
+  ) => DiffuseMenuItem(
     value: action,
     child: Semantics(
       checked: checked,
@@ -639,12 +636,13 @@ class _QueueAwareScaffoldState extends State<_QueueAwareScaffold> {
       widget.onChanged(AppSection.values[index]);
     }
 
-    return PopScope(
+    final page = PopScope(
       canPop: !_showQueue || docked,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _showQueue && !docked) closeQueue();
       },
       child: Scaffold(
+        backgroundColor: Colors.transparent,
         // 手机内容延伸到悬浮栏下，列表通过 Scaffold 留出的底部间距避让。
         extendBody: !tablet,
         body: SafeArea(
@@ -654,6 +652,7 @@ class _QueueAwareScaffoldState extends State<_QueueAwareScaffold> {
               SizedBox(
                 width: tablet ? 80 : 0,
                 child: tablet ? NavigationRail(
+                  backgroundColor: Colors.transparent,
                   labelType: NavigationRailLabelType.all,
                   scrollable: true,
                   selectedIndex: widget.section.index,
@@ -752,6 +751,7 @@ class _QueueAwareScaffoldState extends State<_QueueAwareScaffold> {
         ),
       ),
     );
+    return AppBackground(child: page);
   }
 }
 
@@ -782,7 +782,7 @@ class _LinkDialogState extends State<_LinkDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => AppDialog(
     title: const Text('添加音频链接'),
     content: TextField(
       controller: _url,

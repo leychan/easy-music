@@ -5,6 +5,7 @@ import '../account/account_page.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
 import '../player/playback.dart';
+import 'app_background.dart';
 import 'appearance.dart';
 import 'cover.dart';
 import 'discover_page.dart';
@@ -279,26 +280,14 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final light = colors.brightness == Brightness.light;
-    final canvas = Color.lerp(
-      colors.surface,
-      colors.primaryContainer,
-      light ? 0.3 : 0.15,
-    )!;
     final panel = Color.lerp(
       colors.surface,
       colors.surfaceContainerLowest,
       0.46,
     )!;
     return Scaffold(
-      body: SafeArea(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [canvas, colors.surfaceContainerLow, colors.surface],
-            ),
-          ),
+      body: AppBackground(
+        child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
               final compact = constraints.maxWidth < 880 || _collapsed;
@@ -321,7 +310,7 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                           Expanded(
                             child: Material(
                               color: panel.withValues(
-                                alpha: light ? 0.84 : 0.78,
+                                alpha: light ? 0.36 : 0.30,
                               ),
                               borderRadius: BorderRadius.circular(18),
                               clipBehavior: Clip.antiAlias,
@@ -454,26 +443,31 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                       elevation: 6,
                       borderRadius: BorderRadius.circular(12),
                       clipBehavior: Clip.antiAlias,
-                      child: SizedBox(
-                        width: 252,
-                        child: ListView(
-                          shrinkWrap: true,
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          children: [
-                            for (final (index, word) in words.indexed)
-                              ListTile(
-                                dense: true,
-                                selected:
-                                    AutocompleteHighlightedOption.of(context) ==
-                                    index,
-                                title: Text(
-                                  word,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                onTap: () => onSelected(word),
-                              ),
-                          ],
+                      child: AppBackground(
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: SizedBox(
+                            width: 252,
+                            child: ListView(
+                              shrinkWrap: true,
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              children: [
+                                for (final (index, word) in words.indexed)
+                                  ListTile(
+                                    dense: true,
+                                    selected:
+                                        AutocompleteHighlightedOption.of(context) ==
+                                        index,
+                                    title: Text(
+                                      word,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    onTap: () => onSelected(word),
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),

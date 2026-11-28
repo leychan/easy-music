@@ -6,6 +6,8 @@ import '../music/music_library.dart';
 import '../player/audio_quality.dart';
 import '../player/playback.dart';
 import '../player/track.dart';
+import 'app_dialog.dart';
+import 'diffuse_menu.dart';
 import 'music_toast.dart';
 
 const playbackFadeOptions = [
@@ -15,6 +17,60 @@ const playbackFadeOptions = [
   (1000, '1 秒'),
 ];
 
+// 当前值和箭头一起提示可点，整行仍共用同一个点击入口。
+Widget _settingValue(BuildContext context, String label) {
+  final theme = Theme.of(context);
+  final colors = theme.colorScheme;
+  final titleStyle = ListTileTheme.of(context).titleTextStyle ?? theme.textTheme.titleMedium;
+  return DecoratedBox(
+    decoration: BoxDecoration(
+      color: colors.secondaryContainer,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Padding(
+      padding: const EdgeInsetsDirectional.fromSTEB(12, 6, 8, 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(label, style: TextStyle(color: colors.onSecondaryContainer, fontSize: titleStyle?.fontSize)),
+          ),
+          const SizedBox(width: 4),
+          Icon(Icons.keyboard_arrow_down_rounded, size: 20, color: colors.onSecondaryContainer),
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _playbackSettingTile({
+  required IconData icon,
+  required String title,
+  required String description,
+  required String value,
+  required VoidCallback onTap,
+}) => LayoutBuilder(
+  builder: (context, constraints) {
+    // 窄屏或大字号时把选项移到说明下方，给标题留出整行宽度。
+    final fontScale = MediaQuery.textScalerOf(context).scale(16) / 16;
+    final stackValue = constraints.maxWidth < 244 * fontScale;
+    final choice = _settingValue(context, value);
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: stackValue
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [Text(description), const SizedBox(height: 6), choice],
+            )
+          : Text(description),
+      trailing: stackValue ? null : choice,
+      onTap: onTap,
+    );
+  },
+);
+
 class PlaybackFadeTile extends StatelessWidget {
   const PlaybackFadeTile({super.key, required this.player});
 
@@ -23,26 +79,18 @@ class PlaybackFadeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder(
     valueListenable: player.fadeMilliseconds,
-    builder: (context, current, _) => ListTile(
-      leading: const Icon(Icons.graphic_eq_rounded),
-      title: const Text('播放淡入淡出'),
-      subtitle: const Text('开始播放、暂停和手动切歌时平滑调整音量'),
-      trailing: Text(current == 0 ? '关闭' : '${current / 1000} 秒'),
+    builder: (context, current, _) => _playbackSettingTile(
+      icon: Icons.graphic_eq_rounded,
+      title: '播放淡入淡出',
+      description: '开始播放、暂停和手动切歌时平滑调整音量',
+      value: current == 0 ? '关闭' : '${current / 1000} 秒',
       onTap: () async {
         final selected = await showDialog<int>(
           context: context,
-          builder: (context) => SimpleDialog(
-            title: const Text('播放淡入淡出'),
-            children: [
-              for (final (value, label) in playbackFadeOptions)
-                SimpleDialogOption(
-                  onPressed: () => Navigator.pop(context, value),
-                  child: Row(children: [
-                    Expanded(child: Text(label)),
-                    if (value == current) const Icon(Icons.check_rounded, semanticLabel: '当前时长'),
-                  ]),
-                ),
-            ],
+          builder: (_) => AppChoiceDialog(
+            title: '播放淡入淡出',
+            options: playbackFadeOptions,
+            selected: current,
           ),
         );
         if (selected == null || !context.mounted) return;
@@ -65,29 +113,20 @@ class PlaybackQualityTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder(
     valueListenable: player.preferredQuality,
-    builder: (context, preferred, _) => ListTile(
-      leading: const Icon(Icons.high_quality_outlined),
-      title: const Text('首选音质'),
-      subtitle: const Text('用于下次点播'),
-      trailing: Text(preferred.label),
+    builder: (context, preferred, _) => _playbackSettingTile(
+      icon: Icons.high_quality_outlined,
+      title: '首选音质',
+      description: '用于下次点播',
+      value: preferred.label,
       onTap: () async {
         final quality = await showDialog<AudioQuality>(
           context: context,
-          builder: (context) => SimpleDialog(
-            title: const Text('首选音质'),
-            children: [
-              for (final quality in AudioQuality.values)
-                SimpleDialogOption(
-                  onPressed: () => Navigator.pop(context, quality),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text(quality.label)),
-                      if (quality == preferred)
-                        const Icon(Icons.check_rounded, semanticLabel: '当前音质'),
-                    ],
-                  ),
-                ),
+          builder: (_) => AppChoiceDialog(
+            title: '首选音质',
+            options: [
+              for (final quality in AudioQuality.values) (quality, quality.label),
             ],
+            selected: preferred,
           ),
         );
         if (quality != null && context.mounted) {
@@ -131,13 +170,13 @@ class _QualityButtonState extends State<QualityButton> {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder(
     valueListenable: widget.player.preferredQuality,
-    builder: (context, preferred, _) => PopupMenuButton<AudioQuality>(
+    builder: (context, preferred, _) => DiffuseMenuButton<AudioQuality>(
       tooltip: '首选音质',
       enabled: !_busy,
       onSelected: _select,
       itemBuilder: (_) => [
         for (final quality in AudioQuality.values)
-          CheckedPopupMenuItem(
+          DiffuseMenuItem(
             value: quality,
             checked: preferred == quality,
             child: Text(
@@ -235,51 +274,49 @@ class _SleepTimerDialogState extends State<_SleepTimerDialog> {
     builder: (context, deadline, _) {
       final minutes = int.tryParse(_minutes.text.trim());
       final valid = minutes != null && minutes >= 1 && minutes <= 180;
-      return AlertDialog(
+      return AppDialog(
         title: const Text('定时暂停'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (deadline != null) ...[
-                Text('剩余 ${_remaining(deadline)}'),
-                const SizedBox(height: 12),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (deadline != null) ...[
+              Text('剩余 ${_remaining(deadline)}'),
+              const SizedBox(height: 12),
+            ],
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final preset in [10, 20, 30, 60])
+                  ChoiceChip(
+                    label: Text('$preset 分钟'),
+                    selected: minutes == preset,
+                    onSelected: (_) =>
+                        setState(() => _minutes.text = '$preset'),
+                  ),
               ],
+            ),
+            const SizedBox(height: 12),
+            if (widget.player.onExit != null)
               Wrap(
                 spacing: 8,
                 children: [
-                  for (final preset in [10, 20, 30, 60])
+                  for (final (action, label) in [
+                    (SleepAction.pause, '暂停播放'), (SleepAction.exit, '退出应用'),
+                  ])
                     ChoiceChip(
-                      label: Text('$preset 分钟'),
-                      selected: minutes == preset,
-                      onSelected: (_) =>
-                          setState(() => _minutes.text = '$preset'),
+                      label: Text(label), selected: _action == action,
+                      onSelected: (selected) { if (selected) setState(() => _action = action); },
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
-              if (widget.player.onExit != null)
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final (action, label) in [
-                      (SleepAction.pause, '暂停播放'), (SleepAction.exit, '退出应用'),
-                    ])
-                      ChoiceChip(
-                        label: Text(label), selected: _action == action,
-                        onSelected: (selected) { if (selected) setState(() => _action = action); },
-                      ),
-                  ],
-                ),
-              TextField(
-                controller: _minutes,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: '分钟（1–180）'),
-                onChanged: (_) => setState(() {}),
-              ),
-            ],
-          ),
+            TextField(
+              controller: _minutes,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: '分钟（1–180）'),
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
         ),
         actions: [
           if (deadline != null)

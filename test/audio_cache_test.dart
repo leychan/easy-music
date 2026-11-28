@@ -253,6 +253,14 @@ void main() {
     await waitForTracks(1);
   });
 
+  test('4096 MB 缓存上限在重开后恢复', () async {
+    await cache.setLimit(4096);
+    expect(cache.usage.value.limitMiB, 4096);
+    await cache.close();
+    cache = await AudioCache.open(directory, store);
+    expect(cache.usage.value.limitMiB, 4096);
+  });
+
   test('调低容量优先移除最久未使用的文件，关闭后不再写入', () async {
     final song = track('recent');
     await read(await response(song));

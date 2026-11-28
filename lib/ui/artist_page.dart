@@ -9,6 +9,7 @@ import '../music/catalog.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
 import '../player/playback.dart';
+import 'diffuse_menu.dart';
 import 'discover_page.dart';
 import 'workspace_page.dart';
 
@@ -21,14 +22,13 @@ Future<void> openArtistFromPlayer(
   if (artists.isEmpty) return;
   final name = artists.length == 1
       ? artists.single
-      : await showModalBottomSheet<String>(
+      : await showDiffuseMenuSheet<String>(
           context: context,
-          showDragHandle: true,
           builder: (sheetContext) => SafeArea(
             child: ListView(
               shrinkWrap: true,
               children: [
-                const ListTile(title: Text('选择歌手')),
+                ListTile(title: Text('选择歌手', style: Theme.of(sheetContext).textTheme.titleLarge)),
                 for (final artist in artists)
                   ListTile(
                     title: Text(artist),

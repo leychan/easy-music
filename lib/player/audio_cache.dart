@@ -19,7 +19,7 @@ typedef AudioCacheUsage = ({int limitMiB, int bytes, int tracks});
 class AudioCache {
   AudioCache._(this._directory, this._store, this._limitMiB);
 
-  static const limitsMiB = [0, 256, 512, 1024, 2048];
+  static const limitsMiB = [0, 256, 512, 1024, 2048, 4096];
   static const _defaultLimit = 512;
   static const _preference = 'audio_cache_mib';
   static const _mib = 1024 * 1024;

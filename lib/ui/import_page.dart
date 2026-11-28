@@ -6,6 +6,8 @@ import '../music/music_library.dart';
 import '../music/playlist_file_import.dart';
 import '../music/playlist_import.dart';
 import '../music/song.dart';
+import 'app_dialog.dart';
+import 'diffuse_menu.dart';
 import 'music_toast.dart';
 import 'playlist_actions.dart';
 import 'workspace_page.dart';
@@ -118,7 +120,7 @@ class _ImportPlaylistPageState extends State<ImportPlaylistPage> {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => AppDialog(
         title: const Text('导入结果'),
         content: Text(
           '已添加 ${result.added} 首\n未匹配 ${result.unmatched} 首\n重复 ${result.duplicates} 首',
@@ -132,6 +134,28 @@ class _ImportPlaylistPageState extends State<ImportPlaylistPage> {
       ),
     );
   });
+
+  Widget _selector<T>({
+    required String tooltip,
+    required String value,
+    required List<DiffuseMenuItem<T>> items,
+    required ValueChanged<T> onSelected,
+    String? label,
+  }) => DiffuseMenuButton<T>(
+    tooltip: tooltip,
+    enabled: !_busy,
+    onSelected: onSelected,
+    itemBuilder: (_) => items,
+    child: InputDecorator(
+      decoration: InputDecoration(labelText: label, enabled: !_busy),
+      child: Row(
+        children: [
+          Expanded(child: Text(value, overflow: TextOverflow.ellipsis)),
+          const Icon(Icons.arrow_drop_down),
+        ],
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -172,27 +196,22 @@ class _ImportPlaylistPageState extends State<ImportPlaylistPage> {
             ],
             if (preview != null) ...[
               if (_sources.length > 1)
-                DropdownButtonFormField<int>(
-                  initialValue: _sourceIndex,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: '从备份中选择歌单'),
+                _selector<int>(
+                  tooltip: '从备份中选择歌单',
+                  label: '从备份中选择歌单',
+                  value: preview.title,
                   items: [
                     for (final (index, source) in _sources.indexed)
-                      DropdownMenuItem(
+                      DiffuseMenuItem(
                         value: index,
+                        checked: index == _sourceIndex,
                         child: Text(
                           source.title,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                   ],
-                  onChanged: _busy
-                      ? null
-                      : (index) {
-                          if (index != null) {
-                            setState(() => _sourceIndex = index);
-                          }
-                        },
+                  onSelected: (index) => setState(() => _sourceIndex = index),
                 ),
               ListTile(
                 title: Text(preview.title),
@@ -201,20 +220,18 @@ class _ImportPlaylistPageState extends State<ImportPlaylistPage> {
                 ),
               ),
               if (_targets.isNotEmpty)
-                DropdownButton<Playlist>(
-                  value: target,
-                  isExpanded: true,
-                  hint: const Text('选择导入目标'),
+                _selector<Playlist>(
+                  tooltip: '选择导入目标',
+                  value: target?.name ?? '选择导入目标',
                   items: [
                     for (final item in _targets)
-                      DropdownMenuItem(
+                      DiffuseMenuItem(
                         value: item,
+                        checked: item == target,
                         child: Text(item.name, overflow: TextOverflow.ellipsis),
                       ),
                   ],
-                  onChanged: _busy
-                      ? null
-                      : (item) => setState(() => _target = item),
+                  onSelected: (item) => setState(() => _target = item),
                 ),
               TextButton(
                 onPressed: _busy ? null : _createTarget,

@@ -4,7 +4,9 @@ import 'package:material_ui/material_ui.dart';
 import '../music/music_library.dart';
 import '../player/playback.dart';
 import '../player/track.dart';
+import 'app_dialog.dart';
 import 'cover.dart';
+import 'diffuse_menu.dart';
 import 'favorite_button.dart';
 import 'player_controls.dart';
 
@@ -91,7 +93,7 @@ class DesktopPlayerBar extends StatelessWidget {
                     children: [
                       FavoriteButton.track(library: library, track: track),
                       if (compactActions)
-                        PopupMenuButton<_PlaybackAction>(
+                        DiffuseMenuButton<_PlaybackAction>(
                           tooltip: '更多播放选项',
                           icon: const Icon(Icons.more_horiz_rounded, size: 20),
                           onSelected: (action) => switch (action) {
@@ -99,11 +101,11 @@ class DesktopPlayerBar extends StatelessWidget {
                             _PlaybackAction.lyrics => onOpen(showLyrics: true),
                           },
                           itemBuilder: (_) => [
-                            const PopupMenuItem(
+                            const DiffuseMenuItem(
                               value: _PlaybackAction.volume,
                               child: Text('音量'),
                             ),
-                            PopupMenuItem(
+                            DiffuseMenuItem(
                               value: _PlaybackAction.lyrics,
                               enabled: track != null,
                               child: const Text('歌词'),
@@ -208,7 +210,7 @@ class DesktopPlayerBar extends StatelessWidget {
 
   void _openVolume(BuildContext context) => showDialog<void>(
     context: context,
-    builder: (_) => AlertDialog(
+    builder: (_) => AppDialog(
       title: const Text('播放器音量'),
       content: PlaybackVolumeControl(player: player),
     ),

@@ -13,6 +13,7 @@ import '../player/playback.dart';
 import '../player/track.dart';
 import 'appearance.dart';
 import 'artist_page.dart';
+import 'diffuse_menu.dart';
 import 'favorite_button.dart';
 import 'lyrics_display.dart';
 import 'music_toast.dart';
@@ -399,14 +400,13 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
       }
       final version = versions.length == 1
           ? versions.first
-          : await showModalBottomSheet<LyricVersion>(
+          : await showDiffuseMenuSheet<LyricVersion>(
               context: context,
-              showDragHandle: true,
               builder: (context) => SafeArea(
                 child: ListView(
                   shrinkWrap: true,
                   children: [
-                    const ListTile(title: Text('选择歌词版本')),
+                    ListTile(title: Text('选择歌词版本', style: Theme.of(context).textTheme.titleLarge)),
                     for (final (index, item) in versions.indexed)
                       ListTile(
                         title: Text(
@@ -706,9 +706,8 @@ class _NowPlayingState extends State<_NowPlaying> {
   );
 
   Future<void> _showLyricActions(Track track) async {
-    final action = await showModalBottomSheet<_LyricAction>(
+    final action = await showDiffuseMenuSheet<_LyricAction>(
       context: context,
-      showDragHandle: true,
       builder: (context) => SafeArea(
         child: ListView(
           shrinkWrap: true,

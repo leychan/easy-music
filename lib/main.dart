@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'player/audio_cache.dart';
 import 'player/playback.dart';
 import 'player/session_store.dart';
+import 'ui/app_background.dart';
 import 'ui/appearance.dart';
 import 'ui/external_actions.dart';
 import 'ui/player_page.dart';
@@ -126,7 +127,7 @@ class EasyMusicApp extends StatelessWidget {
           );
   }
 
-  Widget _buildApp(({ThemeMode mode, Color color}) options) {
+  Widget _buildApp(AppearanceOptions options) {
     ThemeData theme(Brightness brightness) {
       final dark = brightness == Brightness.dark;
       return ThemeData(
@@ -149,13 +150,17 @@ class EasyMusicApp extends StatelessWidget {
       theme: theme(Brightness.light),
       darkTheme: theme(Brightness.dark),
       themeMode: options.mode,
+      builder: (context, child) => BackgroundStyleScope(style: options.background, child: child!),
       home: player != null
           ? PlayerPage(player: player, appearance: appearance, sessionStore: sessionStore)
-          : Scaffold(
-              body: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(startupError ?? '无法启动播放器。'),
+          : AppBackground(
+              child: Scaffold(
+                backgroundColor: Colors.transparent,
+                body: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(startupError ?? '无法启动播放器。'),
+                  ),
                 ),
               ),
             ),

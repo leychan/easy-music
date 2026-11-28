@@ -17,6 +17,8 @@ import 'package:easy_music/player/lyrics.dart';
 import 'package:easy_music/player/playback.dart';
 import 'package:easy_music/player/session_store.dart';
 import 'package:easy_music/player/track.dart';
+import 'package:easy_music/ui/app_background.dart';
+import 'package:easy_music/ui/app_dialog.dart';
 import 'package:easy_music/ui/appearance.dart';
 import 'package:easy_music/ui/cover.dart';
 import 'package:easy_music/ui/desktop_player_bar.dart';
@@ -32,7 +34,7 @@ import 'package:easy_music/ui/player_controls.dart';
 import 'package:easy_music/ui/player_page.dart';
 import 'package:easy_music/ui/search_page.dart';
 import 'package:easy_music/ui/workspace_page.dart';
-import 'package:flutter/rendering.dart' show OffsetLayer;
+import 'package:flutter/rendering.dart' show OffsetLayer, RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -94,6 +96,44 @@ void main() {
     appearance.update(mode: ThemeMode.system);
     await tester.pumpAndSettle();
     expect(currentTheme().brightness, Brightness.light);
+  });
+
+  testWidgets('旧版外观设置默认用弥散，纯色随日夜模式切换', (tester) async {
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    const themeColor = Color(0xFF81A9FF);
+    store.savePreference('appearance', jsonEncode({'mode': 'light', 'color': themeColor.toARGB32()}));
+    final appearance = Appearance(store);
+    addTearDown(appearance.dispose);
+    await tester.pumpWidget(EasyMusicApp(appearance: appearance));
+
+    Future<List<Color>> sampleBackground() async {
+      final layer = tester.binding.renderViews.single.debugLayer! as OffsetLayer;
+      return (await tester.runAsync(() async {
+        // 同一条横线上取两个像素，避开页面中间的提示文字。
+        final image = await layer.toImage(const Rect.fromLTWH(24, 24, 400, 1));
+        final bytes = (await image.toByteData(format: ImageByteFormat.rawRgba))!;
+        image.dispose();
+        return [
+          for (final offset in [0, 4 * 399])
+            Color.fromARGB(bytes.getUint8(offset + 3), bytes.getUint8(offset),
+              bytes.getUint8(offset + 1), bytes.getUint8(offset + 2)),
+        ];
+      }))!;
+    }
+
+    expect(appearance.value.background, BackgroundStyle.diffuse);
+    final diffuse = await sampleBackground();
+    expect(diffuse.first, isNot(diffuse.last));
+
+    appearance.update(background: BackgroundStyle.solid);
+    await tester.pumpAndSettle();
+    expect(await sampleBackground(), [Appearance.daySurface, Appearance.daySurface]);
+
+    appearance.update(mode: ThemeMode.dark);
+    await tester.pumpAndSettle();
+    expect(await sampleBackground(), [Appearance.nightSurface, Appearance.nightSurface]);
+    expect(appearance.value.color, themeColor);
   });
 
   void expectPlaybackBarOrder(WidgetTester tester, String title) {
@@ -237,14 +277,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final list = find.byType(ReorderableListView);
-    final scrollable = find.descendant(of: list, matching: find.byType(Scrollable));
-    tester.state<ScrollableState>(scrollable).position.jumpTo(32);
-    await tester.pumpAndSettle();
-
     final bounds = tester.getRect(list);
     final theme = Theme.of(tester.element(list));
-    final layer = tester.binding.renderViews.single.debugLayer! as OffsetLayer;
-    await tester.runAsync(() async {
+    Future<List<Color>?> sampleColors() => tester.runAsync(() async {
+      final layer = tester.binding.renderViews.single.debugLayer! as OffsetLayer;
       // 在列表上边界两侧取样，避开文字、封面和按钮。
       final image = await layer.toImage(
         Rect.fromLTWH(bounds.right - 112, bounds.top - 12, 1, 25),
@@ -260,9 +296,17 @@ void main() {
         );
       }
 
-      expect(colorAt(0), theme.scaffoldBackgroundColor);
-      expect(colorAt(24), theme.colorScheme.secondaryContainer);
+      return [colorAt(0), colorAt(24)];
     });
+
+    final before = (await sampleColors())!;
+    final scrollable = find.descendant(of: list, matching: find.byType(Scrollable));
+    tester.state<ScrollableState>(scrollable).position.jumpTo(32);
+    await tester.pumpAndSettle();
+
+    final after = (await sampleColors())!;
+    expect(after.first, before.first);
+    expect(after.last, theme.colorScheme.secondaryContainer);
   });
 
   testWidgets('Linux 仅搜索页展示搜索栏，底部队列可打开并收起', (tester) async {
@@ -1824,7 +1868,7 @@ void main() {
     expect(find.descendant(of: liked, matching: edit), findsNothing);
     await tester.tap(find.descendant(of: commute, matching: edit));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AlertDialog, '编辑歌单'), findsOneWidget);
+    expect(find.widgetWithText(AppDialog, '编辑歌单'), findsOneWidget);
   });
 
   testWidgets('Android 我的喜欢打开收藏列表，取消收藏后刷新', (tester) async {
@@ -1953,22 +1997,42 @@ void main() {
     await tester.tap(find.widgetWithText(ListTile, '设置'));
     await tester.pumpAndSettle();
 
+    void expectTitleSize(Finder container, String value, String title, {bool smaller = false}) {
+      double? fontSize(String text) => tester.renderObject<RenderParagraph>(
+        find.descendant(of: container, matching: find.text(text)),
+      ).text.style?.fontSize;
+
+      expect(fontSize(value), smaller ? lessThan(fontSize(title)!) : fontSize(title));
+    }
+
+    Finder rowIcon(Finder row, IconData icon) => find.descendant(
+      of: row,
+      matching: find.byIcon(icon),
+    );
+
+    final dialog = find.byType(AppDialog);
     final quality = find.widgetWithText(ListTile, '首选音质');
-    await tester.tap(quality);
+    await tester.tap(rowIcon(quality, Icons.keyboard_arrow_down_rounded));
     await tester.pumpAndSettle();
+    expect(rowIcon(find.widgetWithText(SimpleDialogOption, AudioQuality.standard.label), Icons.radio_button_checked_rounded), findsOneWidget);
+    expectTitleSize(dialog, '无损', '首选音质', smaller: true);
     await tester.tap(find.widgetWithText(SimpleDialogOption, '无损'));
     await tester.pumpAndSettle();
     expect(player.preferredQuality.value, AudioQuality.lossless);
     expect(find.descendant(of: quality, matching: find.text('无损')), findsOneWidget);
+    expectTitleSize(quality, '无损', '首选音质');
     expect(calls.where((url) => url.path == '/tracker/v5/url'), isEmpty);
 
     final fade = find.widgetWithText(ListTile, '播放淡入淡出');
-    await tester.tap(fade);
+    await tester.tap(rowIcon(fade, Icons.keyboard_arrow_down_rounded));
     await tester.pumpAndSettle();
+    expect(rowIcon(find.widgetWithText(SimpleDialogOption, '关闭淡入淡出'), Icons.radio_button_checked_rounded), findsOneWidget);
+    expectTitleSize(dialog, '0.5 秒', '播放淡入淡出', smaller: true);
     await tester.tap(find.widgetWithText(SimpleDialogOption, '0.5 秒'));
     await tester.pumpAndSettle();
     expect(player.fadeMilliseconds.value, 500);
     expect(find.descendant(of: fade, matching: find.text('0.5 秒')), findsOneWidget);
+    expectTitleSize(fade, '0.5 秒', '播放淡入淡出');
 
     final autoVip = find.widgetWithText(SwitchListTile, '自动签到领 VIP');
     expect(tester.widget<SwitchListTile>(autoVip).value, isTrue);
@@ -1984,6 +2048,12 @@ void main() {
     await tester.tap(darkMode);
     await tester.pumpAndSettle();
     expect(tester.widget<ChoiceChip>(darkMode).selected, isTrue);
+    final diffuseBackground = find.widgetWithText(ChoiceChip, '弥散');
+    final solidBackground = find.widgetWithText(ChoiceChip, '纯色');
+    expect(tester.widget<ChoiceChip>(diffuseBackground).selected, isTrue);
+    await tester.tap(solidBackground);
+    await tester.pumpAndSettle();
+    expect(tester.widget<ChoiceChip>(solidBackground).selected, isTrue);
     final reopened = SessionStore(path);
     addTearDown(reopened.close);
     expect(reopened.readSettings().preferredQuality, AudioQuality.lossless);
@@ -1991,11 +2061,12 @@ void main() {
     final restoredAppearance = Appearance(reopened);
     addTearDown(restoredAppearance.dispose);
     expect(restoredAppearance.value.mode, ThemeMode.dark);
+    expect(restoredAppearance.value.background, BackgroundStyle.solid);
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ListTile, '关于'));
     await tester.pumpAndSettle();
-    expect(find.byType(AboutDialog), findsOneWidget);
+    expect(find.descendant(of: dialog, matching: find.text('Easy Music')), findsOneWidget);
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     await tester.binding.handlePopRoute();

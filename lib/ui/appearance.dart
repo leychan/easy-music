@@ -4,11 +4,14 @@ import 'dart:io' show Platform;
 import 'package:material_ui/material_ui.dart';
 
 import '../player/session_store.dart';
+import 'app_background.dart';
 import 'linux_autostart.dart';
 import 'music_toast.dart';
 import 'workspace_page.dart';
 
-class Appearance extends ValueNotifier<({ThemeMode mode, Color color})> {
+typedef AppearanceOptions = ({ThemeMode mode, Color color, BackgroundStyle background});
+
+class Appearance extends ValueNotifier<AppearanceOptions> {
   Appearance(this._store) : super(_restore(_store));
   final SessionStore _store;
 
@@ -19,12 +22,13 @@ class Appearance extends ValueNotifier<({ThemeMode mode, Color color})> {
   static const daySurface = Color(0xFFFBF6EE);
   static const nightSurface = Color(0xFF211923);
 
-  static ({ThemeMode mode, Color color}) get defaults => (
+  static AppearanceOptions get defaults => (
     mode: ThemeMode.system,
     color: Platform.isLinux ? desktopColor : defaultColor,
+    background: BackgroundStyle.diffuse,
   );
 
-  static ({ThemeMode mode, Color color}) _restore(SessionStore store) {
+  static AppearanceOptions _restore(SessionStore store) {
     final raw = store.readPreference('appearance');
     if (raw == null) return defaults;
     try {
@@ -34,20 +38,33 @@ class Appearance extends ValueNotifier<({ThemeMode mode, Color color})> {
           .where((item) => item.name == json['mode'])
           .firstOrNull;
       final color = json['color'];
+      // 旧版本只保存模式和主题色，升级后默认使用弥散背景。
+      final background = BackgroundStyle.values
+          .where((item) => item.name == json['background'])
+          .firstOrNull;
       return (
         mode: mode ?? defaults.mode,
         color: color is int ? Color(color) : defaultColor,
+        background: background ?? defaults.background,
       );
     } on FormatException {
       return defaults;
     }
   }
 
-  void update({ThemeMode? mode, Color? color}) {
-    final next = (mode: mode ?? value.mode, color: color ?? value.color);
+  void update({ThemeMode? mode, Color? color, BackgroundStyle? background}) {
+    final next = (
+      mode: mode ?? value.mode,
+      color: color ?? value.color,
+      background: background ?? value.background,
+    );
     _store.savePreference(
       'appearance',
-      jsonEncode({'mode': next.mode.name, 'color': next.color.toARGB32()}),
+      jsonEncode({
+        'mode': next.mode.name,
+        'color': next.color.toARGB32(),
+        'background': next.background.name,
+      }),
     );
     value = next;
   }
@@ -59,14 +76,20 @@ const _themeModeLabels = {
   ThemeMode.dark: '夜间模式',
 };
 
+const _backgroundLabels = {
+  BackgroundStyle.diffuse: '弥散',
+  BackgroundStyle.solid: '纯色',
+};
+
 void _updateAppearance(
   BuildContext context,
   Appearance appearance, {
   ThemeMode? mode,
   Color? color,
+  BackgroundStyle? background,
 }) {
   try {
-    appearance.update(mode: mode, color: color);
+    appearance.update(mode: mode, color: color, background: background);
   } catch (_) {
     showMusicNotice(context, '无法保存外观设置。');
   }
@@ -97,6 +120,21 @@ class AppearancePage extends StatelessWidget {
                       if (selected) {
                         _updateAppearance(context, appearance, mode: entry.key);
                       }
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Text('背景色', style: Theme.of(context).textTheme.titleMedium),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final entry in _backgroundLabels.entries)
+                  ChoiceChip(
+                    label: Text(entry.value),
+                    selected: options.background == entry.key,
+                    onSelected: (selected) {
+                      if (selected) _updateAppearance(context, appearance, background: entry.key);
                     },
                   ),
               ],

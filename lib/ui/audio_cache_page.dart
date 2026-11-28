@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../player/audio_cache.dart';
+import 'app_dialog.dart';
 import 'music_toast.dart';
 import 'workspace_page.dart';
 
@@ -27,22 +28,13 @@ class _AudioCachePageState extends State<AudioCachePage> {
   Future<void> _changeLimit(int current) async {
     final selected = await showDialog<int>(
       context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('缓存上限'),
-        children: [
+      builder: (_) => AppChoiceDialog(
+        title: '缓存上限',
+        options: [
           for (final limit in AudioCache.limitsMiB)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, limit),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(limit == 0 ? '关闭并清空缓存' : _limitLabel(limit)),
-                  ),
-                  if (limit == current) const Icon(Icons.check_rounded),
-                ],
-              ),
-            ),
+            (limit, limit == 0 ? '关闭并清空缓存' : _limitLabel(limit)),
         ],
+        selected: current,
       ),
     );
     if (!mounted || selected == null || selected == current) return;
@@ -52,7 +44,7 @@ class _AudioCachePageState extends State<AudioCachePage> {
   Future<void> _clear() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => AppDialog(
         title: const Text('清空音频缓存？'),
         content: const Text('清空后，再次播放这些在线歌曲时会重新获取音频。'),
         actions: [

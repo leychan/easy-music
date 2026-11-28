@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../updates/app_update.dart';
+import 'app_dialog.dart';
 import 'external_actions.dart';
 import 'music_toast.dart';
 
@@ -32,7 +33,7 @@ class _UpdateCheckTileState extends State<UpdateCheckTile> {
       final apk = Platform.isAndroid ? update.androidApk : null;
       final download = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
+        builder: (context) => AppDialog(
           title: Text('发现新版本 ${update.version}'),
           content: Text('当前版本 $version'),
           actions: [

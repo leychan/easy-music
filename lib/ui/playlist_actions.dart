@@ -4,7 +4,9 @@ import '../account/kugou/kugou_auth.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
 import '../player/playback.dart';
+import 'app_dialog.dart';
 import 'external_actions.dart';
+import 'diffuse_menu.dart';
 import 'music_toast.dart';
 
 Future<bool> showPlaylistEditor(
@@ -55,27 +57,25 @@ class _PlaylistEditorState extends State<_PlaylistEditor> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => AppDialog(
     title: Text(widget.playlist == null ? '新建歌单' : '编辑歌单'),
-    content: SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: _name,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: '名称'),
+          onChanged: (_) => setState(() {}),
+        ),
+        if (widget.playlist != null)
           TextField(
-            controller: _name,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: '名称'),
-            onChanged: (_) => setState(() {}),
+            controller: _description,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(labelText: '简介'),
           ),
-          if (widget.playlist != null)
-            TextField(
-              controller: _description,
-              minLines: 2,
-              maxLines: 4,
-              decoration: const InputDecoration(labelText: '简介'),
-            ),
-        ],
-      ),
+      ],
     ),
     actions: [
       TextButton(
@@ -153,9 +153,8 @@ class SongMenu extends StatelessWidget {
             notify('请先登录并创建歌单。');
             return;
           }
-          final target = await showModalBottomSheet<Playlist>(
+          final target = await showDiffuseMenuSheet<Playlist>(
             context: context,
-            showDragHandle: true,
             builder: (context) => SafeArea(
               child: ListView(
                 shrinkWrap: true,
@@ -192,22 +191,22 @@ class SongMenu extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => PopupMenuButton<_SongAction>(
+  Widget build(BuildContext context) => DiffuseMenuButton<_SongAction>(
     tooltip: '歌曲操作',
     onSelected: (action) => _handle(context, action),
     itemBuilder: (_) => [
-      const PopupMenuItem(value: _SongAction.details, child: Text('歌曲详情')),
-      const PopupMenuItem(value: _SongAction.queue, child: Text('添加到队列')),
-      PopupMenuItem(
+      const DiffuseMenuItem(value: _SongAction.details, child: Text('歌曲详情')),
+      const DiffuseMenuItem(value: _SongAction.queue, child: Text('添加到队列')),
+      DiffuseMenuItem(
         value: library.isFavorite(song) ? _SongAction.unfavorite : _SongAction.favorite,
         enabled: !library.favoriteBusy(song),
         child: Text(library.isFavorite(song) ? '取消收藏' : '收藏歌曲'),
       ),
-      const PopupMenuItem(value: _SongAction.add, child: Text('添加到歌单')),
+      const DiffuseMenuItem(value: _SongAction.add, child: Text('添加到歌单')),
       if (playlist case final list?
           when library.canEditPlaylist(list) && song.fileId > 0)
-        const PopupMenuItem(value: _SongAction.remove, child: Text('从当前歌单移除')),
-      const PopupMenuItem(value: _SongAction.share, child: Text('分享歌曲')),
+        const DiffuseMenuItem(value: _SongAction.remove, child: Text('从当前歌单移除')),
+      const DiffuseMenuItem(value: _SongAction.share, child: Text('分享歌曲')),
     ],
   );
 }

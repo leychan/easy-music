@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../account/account.dart';
 import '../player/playback.dart';
+import 'app_dialog.dart';
 import 'appearance.dart';
 import 'audio_cache_page.dart';
 import 'external_actions.dart';
@@ -18,6 +19,26 @@ class SettingsPage extends StatelessWidget {
   final Account account;
   final Playback player;
   final Appearance? appearance;
+
+  void _showAbout(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (context) {
+      final labels = MaterialLocalizations.of(context);
+      const name = 'Easy Music';
+      const icon = Icon(Icons.graphic_eq_rounded);
+      return AppDialog(
+        title: const Row(children: [icon, SizedBox(width: 12), Expanded(child: Text(name))]),
+        content: const Text('支持 Android 和 Linux 的音乐播放器。'),
+        actions: [
+          TextButton(
+            onPressed: () => showLicensePage(context: context, applicationName: name, applicationIcon: icon),
+            child: Text(labels.viewLicensesButtonLabel),
+          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(labels.closeButtonLabel)),
+        ],
+      );
+    },
+  );
 
   @override
   Widget build(BuildContext context) => WorkspacePage(
@@ -125,12 +146,7 @@ class SettingsPage extends StatelessWidget {
             leading: const Icon(Icons.info_outline_rounded),
             title: const Text('关于'),
             trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => showAboutDialog(
-              context: context,
-              applicationName: 'Easy Music',
-              applicationIcon: const Icon(Icons.graphic_eq_rounded),
-              children: const [Text('支持 Android 和 Linux 的音乐播放器。')],
-            ),
+            onTap: () => _showAbout(context),
           ),
         ],
       ),

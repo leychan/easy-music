@@ -6,6 +6,7 @@ import '../music/catalog.dart';
 import '../music/music_library.dart';
 import '../music/song.dart';
 import '../player/playback.dart';
+import 'app_dialog.dart';
 import 'catalog_pages.dart';
 import 'cover.dart';
 import 'discover_page.dart';
@@ -146,7 +147,7 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
   Future<void> _remove(CloudTrack track) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => AppDialog(
         title: const Text('移除云盘文件'),
         content: Text('从酷狗云盘移除「${track.song.title}」？'),
         actions: [
