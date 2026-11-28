@@ -4,12 +4,14 @@ import 'dart:io' show Platform;
 import 'package:android_file_picker/android_file_picker.dart' show FilePickerAndroid;
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:just_audio/just_audio.dart' as audio;
 import 'package:synchronized/synchronized.dart';
 
 import 'audio_cache.dart';
 import 'audio_quality.dart';
 import 'session_store.dart';
+import 'stem_mixer.dart';
 import 'track.dart';
 
 enum SleepAction { pause, exit }
@@ -28,12 +30,30 @@ class Playback extends BaseAudioHandler {
     // playerEvent 同时包含播放状态与引擎的进度、曲目变更。
     _player.playerEventStream.listen((_) => _publish());
     _player.errorStream.listen(_reportPlayerError);
+    if (Platform.isAndroid) {
+      _player.positionStream.listen((value) {
+        if (_mixPlayback == null && !_updatingQueue) _androidPositions.add(value);
+      });
+    }
   }
 
   final SessionStore _store;
   final AudioCache? audioCache;
   final _player = audio.AudioPlayer();
   final _commands = Lock();
+  final _androidPositions = StreamController<Duration>.broadcast();
+  late final _showStemMixButton = ValueNotifier(
+    _store.readPreference(_stemButtonPreference) == 'true',
+  );
+  late final _experimentalKaraoke = ValueNotifier(
+    _store.readPreference(_karaokePreference) == 'true',
+  );
+  late final StemMixer? stemMixer = Platform.isAndroid
+      ? StemMixer(
+          onPlayback: _onStemPlayback, onError: _onStemError,
+          allowKaraoke: () => experimentalKaraoke.value,
+        )
+      : null;
   final tracks = ValueNotifier<List<Track>>(const []);
   final history = ValueNotifier<List<PlayedTrack>>(const []);
   final preferredQuality = ValueNotifier(AudioQuality.standard);
@@ -45,6 +65,8 @@ class Playback extends BaseAudioHandler {
   Future<void> Function(Track)? onToggleNotificationFavorite;
   final message = ValueNotifier<String?>(null);
 
+  static const _stemButtonPreference = 'show_stem_mix_button';
+  static const _karaokePreference = 'experimental_karaoke';
   static const _toggleFavoriteAction = 'dev.easymusic.easy_music.TOGGLE_FAVORITE';
   static const _previousAction = 'dev.easymusic.easy_music.PREVIOUS';
   static const _exitAction = 'dev.easymusic.easy_music.EXIT';
@@ -63,17 +85,35 @@ class Playback extends BaseAudioHandler {
   double _volume = 1;
   int _fadeGeneration = 0;
   int? _pendingFadeIn;
+  int _stemSelection = 0;
+  (String, Uri)? _lastSource;
+  int? _endingStemId;
 
   /// 等待新队列时给界面展示「全部播放」的首曲，实际播放状态由媒体会话报告。
   ValueListenable<QueuePreparation?> get queuePreparation => _queuePreparation;
 
-  int get index => _player.processingState == audio.ProcessingState.idle
+  int get _originalIndex => _player.processingState == audio.ProcessingState.idle
       ? _selectedIndex
       : _player.currentIndex ?? _selectedIndex;
-  Duration get position => _player.processingState == audio.ProcessingState.idle
+  int get index {
+    final mixedId = stemMixer?.trackId;
+    if (mixedId != null) {
+      final slot = tracks.value.indexWhere((track) => track.id == mixedId);
+      if (slot >= 0) return slot;
+    }
+    return _originalIndex;
+  }
+
+  Duration get _originalPosition => _player.processingState == audio.ProcessingState.idle
       ? _savedPosition
       : _player.position;
-  Stream<Duration> get positionStream => _player.positionStream;
+  StemPlayback? get _mixPlayback => stemMixer?.playback;
+  audio.ProcessingState get _processingState => _mixPlayback?.state ?? _player.processingState;
+  bool get _playing => _mixPlayback?.playing ?? _player.playing;
+  double get _engineVolume => stemMixer?.active == true ? stemMixer!.masterVolume : _player.volume;
+  Duration? get _duration => _mixPlayback?.duration ?? _player.duration;
+  Duration get position => _mixPlayback?.position ?? _originalPosition;
+  Stream<Duration> get positionStream => Platform.isAndroid ? _androidPositions.stream : _player.positionStream;
   double get volume => _volume;
   Stream<double> get volumeStream => _player.volumeStream.map((_) => volume).distinct();
   ({int plays, int songs, List<ListeningCount> top}) get listeningStats =>
@@ -128,7 +168,7 @@ class Playback extends BaseAudioHandler {
     }
     _publish(offerResume: true);
     Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_player.playing || _queueDirty) saveProgress();
+      if (_playing || _queueDirty) saveProgress();
     });
   }
 
@@ -144,6 +184,201 @@ class Playback extends BaseAudioHandler {
         initialIndex: index,
         initialPosition: position,
       );
+
+  bool canMixStems(Track track) => stemMixer != null && _stemSourceAvailable(track);
+
+  ValueListenable<bool> get showStemMixButton => _showStemMixButton;
+
+  void setShowStemMixButton(bool show) {
+    _store.savePreference(_stemButtonPreference, '$show');
+    _showStemMixButton.value = show;
+  }
+
+  ValueListenable<bool> get experimentalKaraoke => _experimentalKaraoke;
+
+  Future<void> setExperimentalKaraoke(bool enabled) async {
+    _store.savePreference(_karaokePreference, '$enabled');
+    _experimentalKaraoke.value = enabled;
+    if (!enabled) await stemMixer?.setKaraoke(false);
+  }
+
+  Future<bool> hasStemMixResources(Track track) async {
+    final mixer = stemMixer;
+    if (mixer == null || !canMixStems(track)) return false;
+    if (mixer.trackId == track.id) return true;
+    final onlineCache = track.isLocal ? null : audioCache;
+    try {
+      return await mixer.hasResources(
+        onlineCache?.cachedPlaybackUri(track) ?? track.source,
+        cacheKey: onlineCache?.stemCacheKey(track),
+      );
+    } on Exception {
+      return false;
+    }
+  }
+
+  bool _stemSourceAvailable(Track track) => switch (track.source.scheme) {
+    'file' || 'content' => track.isLocal,
+    'http' || 'https' => audioCache?.canProxyTrack(track) ?? false,
+    _ => false,
+  };
+
+  Future<void> enableStemMix(Track track) async {
+    final mixer = stemMixer;
+    if (mixer == null || !canMixStems(track) || !_isOriginalTrack(track)) return;
+    if (mixer.active) return;
+    final selection = _stemSelection;
+    final request = mixer.begin();
+    if (request == null) return;
+    message.value = null;
+    try {
+      // 在线音源和原播放器共用回环缓存，原始地址只由缓存代理处理。
+      final source = audioCache?.playbackUri(track) ?? track.source;
+      final path = await mixer.prepare(
+        request, source,
+        cacheKey: track.isLocal ? null : audioCache?.stemCacheKey(track),
+      );
+      await _commands.synchronized(() async {
+        if (request.cancelled || selection != _stemSelection || !_isOriginalTrack(track)) return;
+        await _activateStemMix(mixer, request, track, path);
+      });
+    } on PlatformException catch (error) {
+      if (!request.cancelled && selection == _stemSelection) {
+        message.value = error.message ?? '无法启用人声 / 伴奏，请重试。';
+      }
+    } on Exception {
+      if (!request.cancelled && selection == _stemSelection) {
+        message.value = '无法启用人声 / 伴奏，请重试。';
+      }
+    } finally {
+      mixer.finish(request);
+    }
+  }
+
+  bool _isOriginalTrack(Track track) {
+    final current = tracks.value.elementAtOrNull(_originalIndex);
+    return current?.id == track.id && current?.source == track.source;
+  }
+
+  Future<void> _activateStemMix(
+    StemMixer mixer,
+    StemPreparation request,
+    Track track,
+    String path,
+  ) async {
+    final previous = _updatingQueue;
+    _updatingQueue = true;
+    var pausedOriginal = false;
+    var wasPlaying = false;
+    try {
+      await mixer.load(
+        request: request, sourceTrackId: track.id, path: path, position: Duration.zero,
+        volume: volume, speed: _player.speed, repeatOne: _player.loopMode == audio.LoopMode.one,
+      );
+      // 准备双轨时原播放器可能已自然播到下一首。
+      if (request.cancelled || !_isOriginalTrack(track)) {
+        await mixer.close();
+        return;
+      }
+      _cancelFade();
+      final completed = _player.processingState == audio.ProcessingState.completed;
+      wasPlaying = _player.playing && !completed;
+      final initialPosition = _originalPosition;
+      await _player.pause();
+      pausedOriginal = true;
+      if (!completed) {
+        final currentPosition = _player.processingState == audio.ProcessingState.idle
+            ? initialPosition : _originalPosition;
+        await mixer.seek(currentPosition);
+      }
+      await _restoreVolume();
+      if (wasPlaying) await mixer.play();
+    } catch (_) {
+      await mixer.close();
+      await _restoreVolume();
+      if (pausedOriginal && wasPlaying) await _start();
+      rethrow;
+    } finally {
+      _updatingQueue = previous;
+      _onStemPlayback(false);
+    }
+  }
+
+  Future<void> disableStemMix() => _commands.synchronized(_resumeOriginalFromMix);
+
+  Future<void> _resumeOriginalFromMix() async {
+    final mixer = stemMixer;
+    if (mixer == null || !mixer.active) return;
+    final slot = index;
+    final wasPlaying = playbackState.value.playing;
+    final previous = _updatingQueue;
+    _updatingQueue = true;
+    try {
+      _cancelFade();
+      final mixed = (await mixer.close())!;
+      _selectedIndex = slot;
+      _savedPosition = mixed.position;
+      if (_player.processingState == audio.ProcessingState.idle) {
+        await _setSources(tracks.value, slot, mixed.position);
+      } else {
+        final originalDuration = _player.duration;
+        await _player.seek(originalDuration != null && mixed.position > originalDuration
+            ? originalDuration : mixed.position, index: slot);
+      }
+      await _restoreVolume();
+      if (wasPlaying) await _start();
+    } finally {
+      _updatingQueue = previous;
+      _onStemPlayback(false);
+      saveProgress();
+    }
+  }
+
+  Future<void> _closeMix() async {
+    final mixer = stemMixer;
+    if (mixer == null || !mixer.active) return;
+    _cancelFade();
+    await mixer.close();
+  }
+
+  void _onStemPlayback(bool positionOnly) {
+    if (_updatingQueue) return;
+    _androidPositions.add(position);
+    if (positionOnly) return;
+    _publish();
+    final mixer = stemMixer;
+    final id = mixer?.playbackId;
+    // 双轨引擎只装载当前歌曲，播完后把队列的后续播放交还现有播放器。
+    if (id == null || id == _endingStemId ||
+        mixer!.playback?.state != audio.ProcessingState.completed || !_playing) {
+      return;
+    }
+    _endingStemId = id;
+    unawaited(_commands.synchronized(() async {
+      try {
+        if (mixer.playbackId != id || !_playing ||
+            _processingState != audio.ProcessingState.completed) {
+          return;
+        }
+        final next = _neighborIndex(1);
+        if (next != null) await _selectAndPlay(next);
+      } on Exception {
+        message.value = '无法播放下一首，请重试。';
+      } finally {
+        if (_endingStemId == id) _endingStemId = null;
+      }
+    }));
+  }
+
+  void _onStemError(int id) => unawaited(_commands.synchronized(() async {
+    if (stemMixer?.playbackId != id) return;
+    try {
+      await _resumeOriginalFromMix();
+      message.value = '分轨播放中断，已切回原声。';
+    } on Exception {
+      message.value = '分轨播放中断，无法恢复原声。';
+    }
+  }));
 
   void startSleepTimer(Duration duration, {SleepAction action = SleepAction.pause}) {
     if (duration <= Duration.zero) return;
@@ -220,6 +455,7 @@ class Playback extends BaseAudioHandler {
       final startPosition = resume ? position : Duration.zero;
       await _changeQueue(updated, () async {
         await _fadeOut();
+        await _closeMix();
         await _player.stop();
         _selectedIndex = slot;
         _savedPosition = startPosition;
@@ -231,7 +467,7 @@ class Playback extends BaseAudioHandler {
         _updateTrackDetails(existing.id, (item) => item.copyWith(artUri: incoming.artUri));
       }
       if (resume) {
-        if (!_player.playing) await _start();
+        if (!_playing) await _start();
       } else {
         await _playAt(slot);
       }
@@ -282,6 +518,8 @@ class Playback extends BaseAudioHandler {
         } else {
           await _fadeOut();
         }
+        _stemSelection++;
+        await _closeMix();
         await _player.stop();
         await _restoreVolume();
         _selectedIndex = 0;
@@ -355,7 +593,10 @@ class Playback extends BaseAudioHandler {
       await _replaceQueue(remaining);
       return !_queueDirty;
     }
+    final removingMix = old[slot].id == stemMixer?.trackId;
+    final resumeAfterRemove = removingMix && playbackState.value.playing;
     await _changeQueue(remaining, () async {
+      if (removingMix) await _closeMix();
       if (_player.processingState == audio.ProcessingState.idle) {
         final current = index;
         _selectedIndex = (slot < current ? current - 1 : current).clamp(
@@ -368,6 +609,7 @@ class Playback extends BaseAudioHandler {
         await _player.removeAudioSourceAt(slot);
       }
     });
+    if (resumeAfterRemove) await _start();
     final saved = !_queueDirty;
     if (saved) await _releaseUnusedFile(old[slot].source);
     return saved;
@@ -453,6 +695,7 @@ class Playback extends BaseAudioHandler {
       await updatePlayer();
     } catch (_) {
       // 播放库可能先改变内存中的队列，再报告原生更新失败。
+      await _closeMix();
       await _player.stop();
       _selectedIndex = previous.index;
       _savedPosition = previous.position;
@@ -557,7 +800,12 @@ class Playback extends BaseAudioHandler {
   void _publish({bool offerResume = false}) {
     if (_updatingQueue) return;
     final current = tracks.value.elementAtOrNull(index);
-    final item = current == null ? null : _mediaItem(current, _player.duration);
+    final source = current == null ? null : (current.id, current.source);
+    if (source != _lastSource) {
+      _lastSource = source;
+      _stemSelection++;
+    }
+    final item = current == null ? null : _mediaItem(current, _duration);
     if (item?.id != _publishedItem?.id ||
         item?.duration != _publishedItem?.duration ||
         item?.artUri != _publishedItem?.artUri) {
@@ -565,8 +813,8 @@ class Playback extends BaseAudioHandler {
       mediaItem.add(item);
     }
 
-    final state = _player.processingState;
-    final playing = _player.playing && state != audio.ProcessingState.completed;
+    final state = _processingState;
+    final playing = _playing && state != audio.ProcessingState.completed;
     if (current?.id != _lastPlayedId ||
         state == audio.ProcessingState.idle ||
         state == audio.ProcessingState.completed) {
@@ -604,7 +852,7 @@ class Playback extends BaseAudioHandler {
         },
         playing: playing,
         updatePosition: position,
-        bufferedPosition: _player.bufferedPosition,
+        bufferedPosition: _mixPlayback?.buffered ?? _player.bufferedPosition,
         queueIndex: current == null ? null : index,
         repeatMode: _repeatMode,
         shuffleMode: _originalQueueOrder == null
@@ -615,7 +863,7 @@ class Playback extends BaseAudioHandler {
     );
     _fadeInWhenReady();
     final continuation = _continuation;
-    if (continuation != null && !continuation.failed && _player.playing &&
+    if (continuation != null && !continuation.failed && _playing &&
         (state == audio.ProcessingState.ready || state == audio.ProcessingState.completed) &&
         current != null && index == tracks.value.length - 1) {
       _requestMoreTracks(continuation);
@@ -640,13 +888,13 @@ class Playback extends BaseAudioHandler {
         final advanceFrom = continuation.advanceFrom;
         final advance = advanceFrom != null && advanceFrom == tracks.value.elementAtOrNull(current)?.id;
         continuation.advanceFrom = null;
-        final finished = _player.processingState == audio.ProcessingState.completed;
+        final finished = _processingState == audio.ProcessingState.completed;
         await _addTracks(more);
         continuation.exhausted = tracks.value.length == previousLength;
         final next = current + 1;
         if (index == current && next < tracks.value.length &&
-            (advance || (_player.playing &&
-                (finished || _player.processingState == audio.ProcessingState.completed)))) {
+            (advance || (_playing &&
+                (finished || _processingState == audio.ProcessingState.completed)))) {
           // 等推荐时可能已手动入队，接当前曲目的下一首，避免跳过队尾新歌。
           if (advance) {
             await _playAt(next);
@@ -690,6 +938,7 @@ class Playback extends BaseAudioHandler {
 
   Future<void> _setRepeatMode(AudioServiceRepeatMode mode) async {
     await _player.setLoopMode(_loopMode(mode));
+    if (stemMixer?.active == true) await stemMixer!.setRepeatOne(mode == AudioServiceRepeatMode.one);
     _preferredRepeatMode = _repeatMode;
     _saveSettings();
     _publish();
@@ -733,20 +982,21 @@ class Playback extends BaseAudioHandler {
             await _player.stop();
             _selectedIndex = slot < 0 ? 0 : slot;
             _savedPosition = savedPosition;
-            await _setSources(updated, _selectedIndex, savedPosition, preload: wasPlaying);
+            await _setSources(updated, _selectedIndex, savedPosition, preload: wasPlaying && _mixPlayback == null);
           }, minimumPosition: savedPosition);
         } catch (_) {
           _originalQueueOrder = previousOrder;
           _publish();
           rethrow;
         }
-        if (wasPlaying) await _start();
+        if (wasPlaying && _mixPlayback == null) await _start();
       });
 
   @override
   Future<void> setSpeed(double speed) => _commands.synchronized(() async {
     if (!speed.isFinite || speed < 0.5 || speed > 2) return;
     await _player.setSpeed(speed);
+    if (stemMixer?.active == true) await stemMixer!.setSpeed(speed);
     _saveSettings();
     _publish();
   });
@@ -756,6 +1006,7 @@ class Playback extends BaseAudioHandler {
     _cancelFade();
     _volume = volume.clamp(0, 1);
     await _player.setVolume(_volume);
+    if (stemMixer?.active == true) await stemMixer!.setVolume(_volume);
     _saveSettings();
     _publish();
   });
@@ -800,6 +1051,7 @@ class Playback extends BaseAudioHandler {
     final positionBeforeSwitch = position;
     final wasPlaying = playbackState.value.playing;
     await _changeQueue(updated, () async {
+      await _closeMix();
       await _player.stop();
       _selectedIndex = slot;
       _savedPosition = positionBeforeSwitch;
@@ -826,7 +1078,7 @@ class Playback extends BaseAudioHandler {
   void _rememberPlayed(Track track) {
     try {
       final previous = history.value;
-      final duration = _player.duration ?? track.duration;
+      final duration = _duration ?? track.duration;
       _store.recordPlayed(track.copyWith(duration: duration), DateTime.now());
       final updated = List<PlayedTrack>.unmodifiable(_store.readHistory());
       history.value = updated;
@@ -893,19 +1145,28 @@ class Playback extends BaseAudioHandler {
   Future<void> _start({bool switchedTrack = false}) async {
     message.value = null;
     try {
-      final restart = _player.processingState == audio.ProcessingState.completed;
+      final mixer = stemMixer;
+      final restart = _processingState == audio.ProcessingState.completed;
       final duration = fadeMilliseconds.value;
-      final fadeIn = duration > 0 && volume > 0 && (switchedTrack || restart || !_player.playing);
+      final fadeIn = duration > 0 && volume > 0 && (switchedTrack || restart || !_playing);
       if (fadeIn) {
         _cancelFade();
-        if (_player.volume != 0) await _player.setVolume(0);
+        if (_engineVolume != 0) await _setEngineVolume(0);
       }
       if (restart) {
-        await _player.seek(Duration.zero);
+        if (mixer?.active == true) {
+          await mixer!.seek(Duration.zero);
+        } else {
+          await _player.seek(Duration.zero);
+        }
       }
       if (fadeIn) _pendingFadeIn = duration;
-      // play() 会等到暂停或播完，不能占住处理切歌、暂停的锁。
-      unawaited(_playUntilPaused());
+      if (mixer?.active == true) {
+        await mixer!.play();
+      } else {
+        // play() 会等到暂停或播完，不能占住处理切歌、暂停的锁。
+        unawaited(_playUntilPaused());
+      }
       _fadeInWhenReady();
     } on Exception {
       _cancelFade();
@@ -959,7 +1220,12 @@ class Playback extends BaseAudioHandler {
     _continuation?.advanceFrom = null;
     try {
       await _fadeOut();
-      await _player.pause();
+      final mixer = stemMixer;
+      if (mixer?.active == true) {
+        await mixer!.pause();
+      } else {
+        await _player.pause();
+      }
     } finally {
       await _restoreVolume();
     }
@@ -983,15 +1249,24 @@ class Playback extends BaseAudioHandler {
     saveProgress();
     _selectedIndex = index;
     _savedPosition = position;
+    final wasMixed = stemMixer?.active == true;
+    _stemSelection++;
+    await _closeMix();
     await _player.stop();
+    if (wasMixed) await _setSources(tracks.value, _selectedIndex, _savedPosition);
     await _restoreVolume();
     await super.stop();
   }
 
   @override
   Future<void> seek(Duration position) => _commands.synchronized(() async {
-    if (_player.duration == null) return;
-    await _player.seek(position);
+    if (_duration == null) return;
+    final mixer = stemMixer;
+    if (mixer?.active == true) {
+      await mixer!.seek(position);
+    } else {
+      await _player.seek(position);
+    }
     saveProgress();
   });
 
@@ -1027,7 +1302,7 @@ class Playback extends BaseAudioHandler {
 
   Future<void> _playAt(int? slot) async {
     if (slot == null || slot < 0 || slot >= tracks.value.length) return;
-    if (fadeMilliseconds.value == 0 || !_player.playing || slot == index || volume == 0) {
+    if (fadeMilliseconds.value == 0 || !_playing || slot == index || volume == 0) {
       await _selectAndPlay(slot);
       return;
     }
@@ -1046,22 +1321,27 @@ class Playback extends BaseAudioHandler {
   }
 
   Future<void> _restoreVolume() async {
-    if (_player.volume != volume) await _player.setVolume(volume);
+    if (_engineVolume != volume) await _setEngineVolume(volume);
+  }
+
+  Future<void> _setEngineVolume(double level) {
+    final mixer = stemMixer;
+    return mixer?.active == true ? mixer!.setVolume(level) : _player.setVolume(level);
   }
 
   Future<void> _fadeOut() async {
     _cancelFade();
     final duration = fadeMilliseconds.value;
-    if (duration > 0 && _player.volume > 0 && _player.playing &&
-        _player.processingState == audio.ProcessingState.ready) {
-      await _rampVolume(_player.volume, 0, duration, _fadeGeneration);
+    if (duration > 0 && _engineVolume > 0 && _playing &&
+        _processingState == audio.ProcessingState.ready) {
+      await _rampVolume(_engineVolume, 0, duration, _fadeGeneration);
     }
   }
 
   void _fadeInWhenReady() {
     final duration = _pendingFadeIn;
-    if (duration == null || !_player.playing ||
-        _player.processingState != audio.ProcessingState.ready) {
+    if (duration == null || !_playing ||
+        _processingState != audio.ProcessingState.ready) {
       return;
     }
     // 音源就绪后才计时，加载慢时也能听到完整的淡入。
@@ -1071,7 +1351,7 @@ class Playback extends BaseAudioHandler {
 
   Future<void> _fadeToPlaybackVolume(int duration, int generation) async {
     try {
-      await _rampVolume(_player.volume, volume, duration, generation);
+      await _rampVolume(_engineVolume, volume, duration, generation);
     } on Exception {
       if (generation == _fadeGeneration) message.value = '无法调整播放音量。';
     }
@@ -1083,12 +1363,22 @@ class Playback extends BaseAudioHandler {
       await Future<void>.delayed(Duration(microseconds: milliseconds * 1000 ~/ steps));
       if (generation != _fadeGeneration) return;
       final level = step == steps ? end : start + (end - start) * step / steps;
-      await _player.setVolume(level);
+      await _setEngineVolume(level);
     }
   }
 
   Future<void> _selectAndPlay(int slot, {bool switchedTrack = false}) async {
     _savedPosition = Duration.zero;
+    final mixer = stemMixer;
+    if (mixer?.active == true) {
+      if (slot == index) {
+        await mixer!.seek(Duration.zero);
+        await _start(switchedTrack: switchedTrack);
+        saveProgress();
+        return;
+      }
+      await _closeMix();
+    }
     if (_player.processingState == audio.ProcessingState.loading ||
         _player.processingState == audio.ProcessingState.idle) {
       await _player.stop();

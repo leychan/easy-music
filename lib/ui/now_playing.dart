@@ -18,6 +18,7 @@ import 'lyrics_display.dart';
 import 'music_toast.dart';
 import 'playback_options.dart';
 import 'player_controls.dart';
+import 'stem_mix_panel.dart';
 import 'workspace_page.dart';
 
 /// 从播放栏或歌曲列表打开同一个播放页面。
@@ -34,6 +35,34 @@ Future<void> showNowPlaying(
       showLyrics: showLyrics,
     ),
   );
+}
+
+/// 点歌成功后打开播放页，取址失败时在原列表显示提示。
+Future<void> playSongFromList(
+  BuildContext context, {
+  required String trackId,
+  required Playback player,
+  required MusicLibrary library,
+  required Future<PlaybackOutcome> Function() play,
+  bool openPlayer = true,
+  VoidCallback? onOpenPlayer,
+}) async {
+  final current = player.trackPlayback;
+  final outcome = openPlayer && current.playing && current.trackId == trackId
+      ? const PlaybackOutcome.started()
+      : await play();
+  // 手机和桌面都会保留隐藏的标签页，切走后不让迟到的点播弹出新页面。
+  if (!context.mounted || ModalRoute.isCurrentOf(context) == false ||
+      !TickerMode.getValuesNotifier(context).value.enabled) {
+    return;
+  }
+  if (outcome.notice case final notice?) showMusicNotice(context, notice);
+  if (!outcome.ok || !openPlayer) return;
+  if (onOpenPlayer != null) {
+    onOpenPlayer();
+  } else {
+    await showNowPlaying(context, player: player, library: library);
+  }
 }
 
 /// 桌面嵌入工作区，Android 独立占据整个页面。
@@ -168,11 +197,11 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
                   SafeArea(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final wide = !widget.mobile && constraints.maxWidth >= 660;
-                        // 宽屏默认并排显示，手动切换后按用户选的视图显示。
+                        final wide = constraints.maxWidth >= 660;
+                        // 宽屏默认并排显示，Android 的歌词入口仍可直接展开歌词。
                         final showLyrics =
                             track != null &&
-                            (_showLyrics ?? (!wide && widget.showLyrics));
+                            (_showLyrics ?? (widget.showLyrics && (widget.mobile || !wide)));
                         void toggleLyrics() =>
                             setState(() => _showLyrics = !showLyrics);
                         void openArtist() => openArtistFromPlayer(
@@ -186,6 +215,48 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
                           style: style,
                           onTap: artists.isEmpty ? null : openArtist,
                         );
+                        final optionsOnLeft = widget.mobile && wide && track != null && !showLyrics;
+                        final quality = QualityButton(
+                          player: player, library: widget.library, track: track,
+                        );
+                        final options = [
+                          IconButton(
+                            tooltip: showLyrics
+                                ? '显示封面'
+                                : (widget.mobile ? '展开歌词' : '显示歌词'),
+                            isSelected: showLyrics,
+                            icon: const Icon(Icons.lyrics_outlined),
+                            selectedIcon: Icon(Icons.lyrics_rounded, color: colors.primary),
+                            style: widget.mobile && showLyrics
+                                ? IconButton.styleFrom(backgroundColor: buttonBackground)
+                                : null,
+                            onPressed: track == null ? null : toggleLyrics,
+                          ),
+                          PlaybackModeButton(player: player, mode: state.repeatMode),
+                          PlaybackSpeedButton(player: player, speed: state.speed),
+                          optionsOnLeft ? quality : Flexible(child: quality),
+                          FavoriteButton.track(library: widget.library, track: track),
+                          if (track != null && player.stemMixer != null)
+                            ValueListenableBuilder(
+                              valueListenable: player.showStemMixButton,
+                              builder: (context, show, _) => show
+                                  ? StemMixButton(player: player, track: track)
+                                  : const SizedBox.shrink(),
+                            ),
+                        ];
+                        final optionBar = optionsOnLeft
+                            ? Wrap(
+                                alignment: WrapAlignment.center,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: options,
+                              )
+                            : Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: options,
+                                ),
+                              );
                         return Column(
                           children: [
                             Padding(
@@ -264,53 +335,11 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
                                 mobile: widget.mobile,
                                 wide: wide,
                                 showLyrics: showLyrics,
+                                safeAreaHeight: constraints.maxHeight,
+                                options: optionsOnLeft ? optionBar : null,
                               ),
                             ),
-                            // 播放选项合并到固定的底栏，滚动歌词时也能操作。
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  IconButton(
-                                    tooltip: showLyrics
-                                        ? '显示封面'
-                                        : (widget.mobile ? '展开歌词' : '显示歌词'),
-                                    isSelected: showLyrics,
-                                    icon: const Icon(Icons.lyrics_outlined),
-                                    selectedIcon: Icon(
-                                      Icons.lyrics_rounded,
-                                      color: colors.primary,
-                                    ),
-                                    style: widget.mobile && showLyrics
-                                        ? IconButton.styleFrom(
-                                            backgroundColor: buttonBackground,
-                                          )
-                                        : null,
-                                    onPressed: track == null ? null : toggleLyrics,
-                                  ),
-                                  PlaybackModeButton(
-                                    player: player,
-                                    mode: state.repeatMode,
-                                  ),
-                                  PlaybackSpeedButton(
-                                    player: player,
-                                    speed: state.speed,
-                                  ),
-                                  Flexible(
-                                    child: QualityButton(
-                                      player: player,
-                                      library: widget.library,
-                                      track: track,
-                                    ),
-                                  ),
-                                  FavoriteButton.track(
-                                    library: widget.library,
-                                    track: track,
-                                  ),
-                                ],
-                              ),
-                            ),
+                            if (!optionsOnLeft) optionBar,
                           ],
                         );
                       },
@@ -463,6 +492,8 @@ class _NowPlaying extends StatefulWidget {
     required this.mobile,
     required this.wide,
     required this.showLyrics,
+    required this.safeAreaHeight,
+    required this.options,
   });
 
   final Track? track;
@@ -475,6 +506,8 @@ class _NowPlaying extends StatefulWidget {
   final bool mobile;
   final bool wide;
   final bool showLyrics;
+  final double safeAreaHeight;
+  final Widget? options;
 
   @override
   State<_NowPlaying> createState() => _NowPlayingState();
@@ -535,9 +568,9 @@ class _NowPlayingState extends State<_NowPlaying> {
                   ),
           );
         }
-        if (mobile) {
-          // 封面按安全区内的页面宽度计算，歌词和控件继续使用各自的留白。
-          final coverSize = constraints.maxWidth * 0.8;
+        if (mobile && !wide) {
+          // 竖向布局按安全区宽度计算封面，限制平板上的最大尺寸。
+          final coverSize = (constraints.maxWidth * 0.8).clamp(0.0, 420.0);
           final panelPadding = EdgeInsets.symmetric(
             horizontal: (constraints.maxWidth - panelWidth) / 2,
           );
@@ -571,11 +604,15 @@ class _NowPlayingState extends State<_NowPlaying> {
                 )
               : panel;
         }
+        final tabletColumns = widget.options != null;
+        final optionInset = (height / 12).clamp(0.0, 12.0);
         final playerPanel = SizedBox(
           width: panelWidth,
           child: SingleChildScrollView(
             primary: false,
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: tabletColumns
+                ? const EdgeInsets.only(top: 12)
+                : const EdgeInsets.symmetric(vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -592,18 +629,46 @@ class _NowPlayingState extends State<_NowPlaying> {
             ),
           ),
         );
+        final lyricsInset = (height / 8).clamp(0.0, 16.0);
+        // 标题栏已占用顶部空间，右侧底部留出等量空间，让歌词对齐安全区中央。
+        // 极矮的分屏缩小这块留白，给歌词保留可视空间。
+        final titleInset = (widget.safeAreaHeight - height).clamp(0.0, height / 2);
         return Padding(
           padding: EdgeInsets.symmetric(horizontal: horizontal),
           child: wide && track != null && !showLyrics
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Center(child: playerPanel),
+                    if (widget.options case final options?)
+                      SizedBox(
+                        width: panelWidth,
+                        child: Padding(
+                          padding: EdgeInsets.only(bottom: optionInset),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              // 留出封面顶部的空间，按钮上下各分到等量留白。
+                              const SizedBox(height: 8),
+                              Flexible(
+                                child: Padding(
+                                  padding: EdgeInsets.only(bottom: optionInset),
+                                  child: playerPanel,
+                                ),
+                              ),
+                              options,
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      Center(child: playerPanel),
                     const SizedBox(width: 44),
                     Expanded(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: _lyricPanel(track),
+                        padding: tabletColumns
+                            ? EdgeInsets.only(top: lyricsInset, bottom: lyricsInset + titleInset)
+                            : const EdgeInsets.symmetric(vertical: 16),
+                        child: _lyricPanel(track, topPadding: tabletColumns ? 0 : 8),
                       ),
                     ),
                   ],
@@ -614,7 +679,7 @@ class _NowPlayingState extends State<_NowPlaying> {
     );
   }
 
-  Widget _lyricPanel(Track track) => GestureDetector(
+  Widget _lyricPanel(Track track, {double topPadding = 8}) => GestureDetector(
     behavior: HitTestBehavior.opaque,
     // 展开时轻点歌词回到封面，长按和右键仍打开歌词选项。
     onTap: widget.showLyrics ? widget.onToggleLyrics : null,
@@ -630,7 +695,7 @@ class _NowPlayingState extends State<_NowPlaying> {
             ),
           )
         : Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: EdgeInsets.only(top: topPadding),
             child: SyncedLyrics(
               key: ValueKey(track.id),
               player: widget.player,

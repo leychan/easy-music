@@ -76,14 +76,31 @@ class _ArtistPageState extends State<ArtistPage> {
   Future<List<String>>? _portraits;
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.artist case final artist?) _setArtist(artist);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.artist case final artist? when _artist == null) {
+      _setArtist(artist);
+    }
   }
 
   void _setArtist(CatalogHit artist) {
     _artist = artist;
-    _portraits = widget.library.artistImages(artist.id);
+    _portraits = _loadPortraits(artist.id);
+  }
+
+  Future<List<String>> _loadPortraits(String id) async {
+    final photos = await widget.library.artistImages(id);
+    for (var index = 0; index < photos.length && mounted; index++) {
+      // 等到首张可用大图解码后再显示页头照片，坏图就继续试下一张。
+      var failed = false;
+      await precacheImage(
+        NetworkImage(photos[index]),
+        context,
+        onError: (_, _) => failed = true,
+      );
+      if (!failed) return index == 0 ? photos : photos.sublist(index);
+    }
+    return const [];
   }
 
   Future<CatalogSearchResult<List<Song>>> _loadSongs(int page) async {
@@ -137,11 +154,19 @@ class _ArtistPageState extends State<ArtistPage> {
           children: [
             FutureBuilder<List<String>>(
               future: _portraits,
-              builder: (context, snapshot) => _ArtistPortrait(
-                name: _artist?.title ?? widget.name,
-                photos: snapshot.data ?? const [],
-                avatar: resolveCoverUrl(_artist?.cover ?? '', 800),
-              ),
+              builder: (context, snapshot) {
+                final photos = snapshot.data ?? const <String>[];
+                final showAvatar =
+                    snapshot.connectionState == ConnectionState.done &&
+                    photos.isEmpty;
+                return _ArtistPortrait(
+                  name: _artist?.title ?? widget.name,
+                  photos: photos,
+                  avatar: showAvatar
+                      ? resolveCoverUrl(_artist?.cover ?? '', 800)
+                      : '',
+                );
+              },
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 10, 12, 0),
@@ -180,6 +205,9 @@ class _ArtistPortrait extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final statusBarHeight = MediaQuery.paddingOf(context).top;
+    final fadeDuration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
     final placeholder = ColoredBox(
       color: colors.surfaceContainerHighest,
       child: Center(
@@ -191,20 +219,21 @@ class _ArtistPortrait extends StatelessWidget {
       ),
     );
 
-    Widget image(String url, Widget fallback) => url.isEmpty
-        ? fallback
+    Widget image(String url) => url.isEmpty
+        ? const SizedBox.shrink()
         : Image.network(
             url,
             fit: BoxFit.cover,
             alignment: const Alignment(0, -0.45),
             excludeFromSemantics: true,
             frameBuilder: (context, child, frame, synchronous) =>
-                frame == null && !synchronous ? fallback : child,
-            errorBuilder: (_, _, _) => fallback,
+                AnimatedOpacity(
+                  opacity: frame == null && !synchronous ? 0 : 1,
+                  duration: synchronous ? Duration.zero : fadeDuration,
+                  child: child,
+                ),
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
           );
-
-    Widget portrait(String url) =>
-        image(url, image(avatar == url ? '' : avatar, placeholder));
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: _photoSystemStyle,
@@ -216,14 +245,15 @@ class _ArtistPortrait extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
+              placeholder,
               if (photos.length > 1)
                 _ArtistCarousel(
                   key: ObjectKey(photos),
                   photoCount: photos.length,
-                  portrait: (index) => portrait(photos[index]),
+                  portrait: (index) => image(photos[index]),
                 )
               else
-                portrait(photos.firstOrNull ?? ''),
+                image(photos.firstOrNull ?? avatar),
               const IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(

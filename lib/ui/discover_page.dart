@@ -56,6 +56,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
   bool _startedRecommendations = false;
   bool _loadingFm = false;
   bool _loadingPlaylists = false;
+  bool _openingSong = false;
   int _loadAttempt = 0;
 
   @override
@@ -248,10 +249,19 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Future<void> _playSong(Song song) async {
-    final outcome = await widget.library.playSong(song, widget.player);
-    if (!mounted) return;
-    final notice = outcome.notice;
-    if (notice != null) showMusicNotice(context, notice);
+    if (_openingSong) return;
+    _openingSong = true;
+    try {
+      await playSongFromList(
+        context,
+        trackId: song.id,
+        player: widget.player,
+        library: widget.library,
+        play: () => widget.library.playSong(song, widget.player, resumeCurrent: true),
+      );
+    } finally {
+      _openingSong = false;
+    }
   }
 
   Future<void> _playAll(List<Song> songs, {required bool privateFm}) async {
@@ -458,6 +468,7 @@ class _DiscoverCarousel extends StatefulWidget {
 class _DiscoverCarouselState extends State<_DiscoverCarousel> {
   static const _peek = 18.0;
   static const _maxStackDepth = 3;
+  static const _maxCardSize = 148.0;
   final _scroll = ScrollController();
 
   @override
@@ -473,13 +484,13 @@ class _DiscoverCarouselState extends State<_DiscoverCarousel> {
     return LayoutBuilder(builder: (context, constraints) {
       const gap = 12.0;
       final width = constraints.maxWidth;
-      final size = ((width - 2 * gap - 2 * _peek) / 3).clamp(48.0, 148.0);
+      final size = ((width - 2 * gap - 2 * _peek) / 3).clamp(48.0, _maxCardSize);
       final stride = size + gap;
       final height = size + 16 + (scaler.scale(16) + scaler.scale(12)) * 1.2;
       final flatWidth = widget.count * stride - gap;
-      // 桌面按实际内容宽度决定平铺数量，只在放不下所有卡片时预留堆叠露边。
+      // 卡片到达最大尺寸后，用多出来的空间平铺更多卡片。
       var flatSlots = 3;
-      if (widget.desktop) {
+      if (widget.desktop || size == _maxCardSize) {
         flatSlots = flatWidth <= width ? widget.count
             : ((width + gap - 2 * _peek) / stride).floor().clamp(1, widget.count);
       }

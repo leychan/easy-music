@@ -20,11 +20,15 @@ class MiniPlayerBar extends StatelessWidget {
     required this.player,
     required this.library,
     required this.onOpen,
+    this.onToggleQueue,
+    this.queueVisible = false,
   });
 
   final Playback player;
   final MusicLibrary library;
   final void Function({required bool showLyrics}) onOpen;
+  final VoidCallback? onToggleQueue;
+  final bool queueVisible;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -181,6 +185,13 @@ class MiniPlayerBar extends StatelessWidget {
                         : () => onOpen(showLyrics: true),
                   ),
                   PlayerControls(player: player, compact: true),
+                  if (onToggleQueue != null)
+                    IconButton(
+                      tooltip: queueVisible ? '收起队列' : '打开播放队列',
+                      isSelected: queueVisible,
+                      icon: const Icon(Icons.queue_music_rounded),
+                      onPressed: onToggleQueue,
+                    ),
                 ],
               ),
             ),

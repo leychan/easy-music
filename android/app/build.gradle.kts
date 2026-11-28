@@ -23,6 +23,8 @@ val missingReleaseSigningFields = listOf("storeFile", "storePassword", "keyAlias
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
+    implementation("androidx.media3:media3-exoplayer:1.9.2")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
 }
 
 android {
@@ -84,6 +86,7 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
+            proguardFiles("proguard-rules.pro")
         }
     }
 }

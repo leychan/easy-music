@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:easy_music/account/account.dart';
@@ -9,8 +10,10 @@ import 'package:easy_music/music/discover_cache.dart';
 import 'package:easy_music/music/kugou_music_api.dart';
 import 'package:easy_music/music/music_library.dart';
 import 'package:easy_music/music/song.dart';
+import 'package:easy_music/player/audio_cache.dart';
 import 'package:easy_music/player/playback.dart';
 import 'package:easy_music/player/session_store.dart';
+import 'package:easy_music/player/stem_mixer.dart';
 import 'package:easy_music/player/track.dart';
 import 'package:easy_music/ui/artist_page.dart';
 import 'package:easy_music/ui/cover.dart';
@@ -20,10 +23,11 @@ import 'package:easy_music/ui/mv_player_page.dart';
 import 'package:easy_music/ui/now_playing.dart';
 import 'package:easy_music/ui/player_controls.dart';
 import 'package:easy_music/ui/search_page.dart';
+import 'package:easy_music/ui/settings_page.dart';
 import 'package:easy_music/ui/song_tile.dart';
 import 'package:easy_music/ui/workspace_page.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
-import 'package:flutter/services.dart' show SystemChannels;
+import 'package:flutter/services.dart' show MethodChannel, SystemChannels;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -72,7 +76,167 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
   }
 
+  testWidgets('有缓存直接调音，分轨开关和实验耳返设置分别生效', (tester) async {
+    tester.view
+      ..physicalSize = const Size(320, 560)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = SessionStore(':memory:');
+    final account = Account();
+    addTearDown(store.close);
+    addTearDown(account.dispose);
+    final (cache, cacheDirectory) = (await tester.runAsync(() async {
+      final directory = await Directory.systemTemp.createTemp('stem-entry-test');
+      return (await AudioCache.open(directory, store), directory);
+    }))!;
+    addTearDown(() async {
+      await cache.close();
+      await cacheDirectory.delete(recursive: true);
+    });
+    final player = _StemTestPlayer(store, audioCache: cache);
+    final library = _TestLibrary(account);
+    addTearDown(library.dispose);
+    addTearDown(player.stemMixer.dispose);
+    const stems = MethodChannel('dev.easymusic.easy_music/stems');
+    const events = MethodChannel('dev.easymusic.easy_music/stem_events');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    Completer<void>? pendingLoad;
+    messenger.setMockMethodCallHandler(events, (_) async => null);
+    messenger.setMockMethodCallHandler(stems, (call) async {
+      if (call.method == 'load') {
+        await pendingLoad?.future;
+        return {
+          'state': 3, 'playing': false, 'position': 0, 'duration': 20000, 'buffered': 20000,
+        };
+      }
+      return call.method == 'hasResources'
+          ? (call.arguments as Map)['uri'] == 'file:///music/test.mp3'
+          : null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(events, null);
+      messenger.setMockMethodCallHandler(stems, null);
+    });
+
+    await player.playTracks([Track.online('online', _url.url)]);
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(platform: TargetPlatform.android),
+      home: NowPlayingPage(player: player, library: library),
+    ));
+    await tester.pumpAndSettle();
+
+    final entry = find.byTooltip('人声 / 伴奏');
+    expect(entry, findsNothing);
+    final navigator = Navigator.of(tester.element(find.byType(NowPlayingPage)));
+    final setting = find.widgetWithText(SwitchListTile, '显示人声 / 伴奏按钮');
+    final experiment = find.widgetWithText(SwitchListTile, 'K 歌耳返');
+
+    Future<void> openSettings() async {
+      unawaited(navigator.push<void>(MaterialPageRoute(
+        builder: (_) => SettingsPage(account: account, player: player),
+      )));
+      await tester.pumpAndSettle();
+    }
+
+    await openSettings();
+    expect(tester.widget<SwitchListTile>(setting).value, isFalse);
+    expect(tester.widget<SwitchListTile>(experiment).value, isFalse);
+    expect(find.text('实验性功能'), findsOneWidget);
+    await tester.tap(setting);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(setting).value, isTrue);
+    expect(Playback(store).showStemMixButton.value, isTrue);
+    navigator.pop();
+    await tester.pumpAndSettle();
+
+    expect(entry.hitTestable(), findsOneWidget);
+    expect(find.text('人声 / 伴奏'), findsNothing);
+    expect(
+      tester.getCenter(entry).dy,
+      tester.getCenter(find.byTooltip('展开歌词')).dy,
+    );
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('在线歌曲需要先读取完整音频'), findsOneWidget);
+    final enable = find.widgetWithText(FilledButton, '启用分轨');
+    expect(tester.widget<FilledButton>(enable).onPressed, isNotNull);
+    Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+    await tester.pumpAndSettle();
+
+    await player.playTracks([Track.online('stream', 'https://example.org/live.m3u8')]);
+    await tester.pumpAndSettle();
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('当前音源无法分轨'), findsOneWidget);
+    expect(enable, findsNothing);
+    Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+    await tester.pumpAndSettle();
+
+    await player.playTracks([
+      Track(id: 'local', title: '本地测试歌曲', source: Uri.file('/music/test.mp3')),
+    ]);
+    await tester.pumpAndSettle();
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+    final splitSwitch = find.byType(Switch).first;
+    expect(find.text('原唱'), findsOneWidget);
+    expect(find.text('伴奏'), findsOneWidget);
+    expect(enable, findsNothing);
+    expect(tester.widget<Switch>(splitSwitch).value, isFalse);
+    final panel = find.byType(BottomSheet);
+    final panelRect = tester.getRect(panel);
+    pendingLoad = Completer<void>();
+    await tester.tap(splitSwitch);
+    await tester.pump();
+    expect(find.text('原唱'), findsOneWidget);
+    expect(find.text('伴奏'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(tester.getRect(panel), panelRect);
+    expect(tester.widget<Switch>(splitSwitch).onChanged, isNull);
+    pendingLoad.complete();
+    pendingLoad = null;
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(splitSwitch).value, isTrue);
+    expect(find.text('切回原声'), findsNothing);
+    expect(find.text('K 歌耳返'), findsNothing);
+    await player.stemMixer.setGains(voice: 0.3);
+    await tester.tap(splitSwitch);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(splitSwitch).value, isFalse);
+    expect(tester.widget<Slider>(find.byType(Slider).last).onChanged, isNull);
+    await tester.tap(splitSwitch);
+    await tester.pumpAndSettle();
+    expect(player.stemMixer.vocals, 0.3);
+    Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+    await tester.pumpAndSettle();
+
+    await openSettings();
+    await tester.tap(experiment);
+    await tester.pumpAndSettle();
+    expect(Playback(store).experimentalKaraoke.value, isTrue);
+    navigator.pop();
+    await tester.pumpAndSettle();
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+    expect(find.text('K 歌耳返'), findsOneWidget);
+    Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+    await tester.pumpAndSettle();
+
+    await openSettings();
+    await tester.tap(setting);
+    await tester.pumpAndSettle();
+    expect(Playback(store).showStemMixButton.value, isFalse);
+    navigator.pop();
+    await tester.pumpAndSettle();
+    expect(entry, findsNothing);
+  });
+
   testWidgets('播放页的歌名和歌手名均可打开歌手页，播放图标可播放整份列表', (tester) async {
+    const photos = ['https://example.org/a.jpg', 'https://example.org/b.jpg'];
+    for (final url in photos) {
+      _cacheArtistFrame(url, Future.value(_artistImageInfo(Colors.blue)));
+    }
     tester.view
       ..physicalSize = const Size(400, 840)
       ..devicePixelRatio = 1
@@ -93,7 +257,7 @@ void main() {
         ],
       }
       ..artistSongs = [_first, _second]
-      ..artistPhotos = ['https://example.org/a.jpg', 'https://example.org/b.jpg'];
+      ..artistPhotos = photos;
     addTearDown(store.close);
     addTearDown(account.dispose);
     addTearDown(library.dispose);
@@ -153,6 +317,72 @@ void main() {
     expect(find.byType(ArtistPage), findsNothing);
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(player.tracks.value.map((track) => track.id), [_first.id, _second.id]);
+  });
+
+  testWidgets('首张歌手大图解码前只显示占位图', (tester) async {
+    const avatar = 'https://example.org/artist-avatar.jpg';
+    const firstPhoto = 'https://example.org/artist-photo.jpg';
+    const secondPhoto = 'https://example.org/artist-other-photo.jpg';
+    final photos = Completer<List<String>>();
+    final photoFrame = Completer<ImageInfo>();
+    _cacheArtistFrame(avatar, Future.value(_artistImageInfo(Colors.blue)));
+    _cacheArtistFrame(firstPhoto, photoFrame.future);
+    _cacheArtistFrame(secondPhoto, Future.value(_artistImageInfo(Colors.green)));
+    await _mountArtistPortrait(tester, avatar, photos.future);
+
+    expect(_artistImage(avatar), findsNothing);
+    expect(find.byIcon(Icons.person_rounded), findsOneWidget);
+    expect(find.byType(PageView), findsNothing);
+
+    photos.complete([firstPhoto, secondPhoto]);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 6));
+    expect(_artistImage(avatar), findsNothing);
+    expect(find.byIcon(Icons.person_rounded), findsOneWidget);
+    expect(find.byType(PageView), findsNothing);
+
+    photoFrame.complete(_artistImageInfo(Colors.red));
+    await tester.pumpAndSettle();
+    expect(find.byType(PageView), findsOneWidget);
+    final pixels = find.descendant(of: _artistImage(firstPhoto), matching: find.byType(RawImage));
+    expect(tester.widget<RawImage>(pixels).image, isNotNull);
+    expect(_artistImage(avatar), findsNothing);
+  });
+
+  for (final secondPhotoLoads in [true, false]) {
+    final title = secondPhotoLoads ? '首张大图失败时继续等下一张' : '所有大图失败后才显示头像';
+    testWidgets(title, (tester) async {
+      const avatar = 'https://example.org/fallback-avatar.jpg';
+      const firstPhoto = 'https://example.org/first-photo.jpg';
+      const secondPhoto = 'https://example.org/second-photo.jpg';
+      final firstFrame = Completer<ImageInfo>();
+      final secondFrame = Completer<ImageInfo>();
+      _cacheArtistFrame(avatar, Future.value(_artistImageInfo(Colors.blue)));
+      _cacheArtistFrame(firstPhoto, firstFrame.future);
+      _cacheArtistFrame(secondPhoto, secondFrame.future);
+      await _mountArtistPortrait(tester, avatar, Future.value([firstPhoto, secondPhoto]));
+
+      firstFrame.completeError(StateError('首张大图下载失败'));
+      await tester.pumpAndSettle();
+      expect(_artistImage(avatar), findsNothing);
+      expect(find.byIcon(Icons.person_rounded), findsOneWidget);
+
+      if (secondPhotoLoads) {
+        secondFrame.complete(_artistImageInfo(Colors.green));
+      } else {
+        secondFrame.completeError(StateError('第二张大图下载失败'));
+      }
+      await tester.pumpAndSettle();
+      expect(_artistImage(avatar), secondPhotoLoads ? findsNothing : findsOneWidget);
+      expect(_artistImage(secondPhoto), secondPhotoLoads ? findsOneWidget : findsNothing);
+    });
+  }
+
+  testWidgets('接口没有返回歌手大图时显示头像', (tester) async {
+    const avatar = 'https://example.org/avatar-without-photos.jpg';
+    _cacheArtistFrame(avatar, Future.value(_artistImageInfo(Colors.blue)));
+    await _mountArtistPortrait(tester, avatar, Future.value(const []));
+    expect(_artistImage(avatar), findsOneWidget);
   });
 
   testWidgets('歌手歌曲滚动到底自动续页，失败后重试原页并去重', (tester) async {
@@ -480,6 +710,28 @@ void main() {
     expect(tester.widget<SongTile>(row(_first)).selected, isFalse);
     expect(tester.widget<SongTile>(row(_second)).selected, isTrue);
     expect(button(_second, '暂停'), findsOneWidget);
+
+    await tester.tap(find.text(_first.title));
+    await tester.pumpAndSettle();
+    expect(find.byType(NowPlayingPage), findsNothing);
+    expect(find.text('请先登录酷狗账号后再播放。'), findsOneWidget);
+    expect(player.trackPlayback.trackId, _second.id);
+
+    library.firstRequest = null;
+    await tester.tap(find.text(_first.title));
+    await finishPlayingTransition(tester);
+    expect(find.byType(NowPlayingPage), findsOneWidget);
+    expect(find.text(_first.title), findsOneWidget);
+    await tester.tap(find.byTooltip('返回播放器'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byType(TextField)).controller?.text, '测试');
+    expect(button(_first, '暂停'), findsOneWidget);
+
+    final requestCount = library.requested.length;
+    await tester.tap(find.text(_first.title));
+    await finishPlayingTransition(tester);
+    expect(find.byType(NowPlayingPage), findsOneWidget);
+    expect(library.requested, hasLength(requestCount));
   });
 
   testWidgets('综合和分类搜索滚动追加结果，全部播放包含已加载歌曲并去重', (tester) async {
@@ -851,6 +1103,44 @@ void main() {
   });
 }
 
+Future<void> _mountArtistPortrait(WidgetTester tester, String avatar, Future<List<String>> photos) async {
+  final store = SessionStore(':memory:');
+  final account = Account();
+  final library = _TestLibrary(account)..nextArtistPhotos = photos;
+  addTearDown(store.close);
+  addTearDown(account.dispose);
+  addTearDown(library.dispose);
+  await tester.pumpWidget(MaterialApp(
+    home: ArtistPage(
+      name: '示例歌手',
+      artist: CatalogHit(id: '11', title: '示例歌手', cover: avatar),
+      player: _TestPlayer(store),
+      library: library,
+    ),
+  ));
+  await tester.pumpAndSettle();
+}
+
+Finder _artistImage(String url) => find.byWidgetPredicate(
+  (widget) => widget is Image && widget.image == NetworkImage(url),
+);
+
+void _cacheArtistFrame(String url, Future<ImageInfo> frame) {
+  final cache = PaintingBinding.instance.imageCache;
+  final provider = NetworkImage(url);
+  cache.putIfAbsent(provider, () => OneFrameImageStreamCompleter(frame));
+  addTearDown(() => cache.evict(provider));
+}
+
+ImageInfo _artistImageInfo(Color color) {
+  final recorder = ui.PictureRecorder();
+  ui.Canvas(recorder).drawColor(color, ui.BlendMode.src);
+  final picture = recorder.endRecording();
+  final image = picture.toImageSync(1, 1);
+  picture.dispose();
+  return ImageInfo(image: image);
+}
+
 class _TestLibrary extends MusicLibrary {
   _TestLibrary(super.account, {super.store});
 
@@ -867,6 +1157,7 @@ class _TestLibrary extends MusicLibrary {
   final complexPages = <int>[];
   List<Song> artistSongs = const [];
   List<String> artistPhotos = const [];
+  Future<List<String>>? nextArtistPhotos;
   String? lastArtistId;
   final requestedArtistPages = <int>[];
   FutureOr<CatalogSearchResult<List<Song>>> Function(int page)? loadArtistPage;
@@ -879,7 +1170,7 @@ class _TestLibrary extends MusicLibrary {
   }
 
   @override
-  Future<List<String>> artistImages(String id) async => artistPhotos;
+  Future<List<String>> artistImages(String id) => nextArtistPhotos ?? Future.value(artistPhotos);
 
   @override
   Future<Uri> videoAddress(String hash) => loadVideoAddress?.call(hash) ?? super.videoAddress(hash);
@@ -934,7 +1225,7 @@ class _TestLibrary extends MusicLibrary {
 
 /// 用同步的播放状态代替原生音频输出，保留歌单的实际点播逻辑。
 class _TestPlayer extends Playback {
-  _TestPlayer(super.store);
+  _TestPlayer(super.store, {super.audioCache});
 
   @override
   Future<bool> addTracks(List<Track> items) async {
@@ -982,5 +1273,34 @@ class _TestPlayer extends Playback {
   @override
   Future<void> pauseTrack(String trackId) async {
     if (trackPlayback.trackId == trackId) await pause();
+  }
+}
+
+class _StemTestPlayer extends _TestPlayer {
+  _StemTestPlayer(super.store, {super.audioCache});
+
+  final _mixer = StemMixer(onPlayback: (_) {}, onError: (_) {});
+
+  @override
+  StemMixer get stemMixer => _mixer;
+
+  @override
+  Future<void> enableStemMix(Track track) async {
+    final request = _mixer.begin()!;
+    await _mixer.load(
+      request: request,
+      sourceTrackId: track.id,
+      path: '/cache/stems.wav',
+      position: Duration.zero,
+      volume: 1,
+      speed: 1,
+      repeatOne: false,
+    );
+    _mixer.finish(request);
+  }
+
+  @override
+  Future<void> disableStemMix() async {
+    await _mixer.close();
   }
 }

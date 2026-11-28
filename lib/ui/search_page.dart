@@ -13,6 +13,7 @@ import 'cover.dart';
 import 'favorite_button.dart';
 import 'catalog_pages.dart';
 import 'music_toast.dart';
+import 'now_playing.dart';
 import 'playlist_actions.dart';
 import 'player_controls.dart' show runPlayerAction;
 import 'song_tile.dart';
@@ -68,6 +69,7 @@ class _SearchPageState extends State<SearchPage> {
   bool _searching = false;
   bool _loadingMore = false;
   bool _playingAll = false;
+  String? _pendingSongId;
   String? _error;
   String? _moreError;
 
@@ -292,11 +294,21 @@ class _SearchPageState extends State<SearchPage> {
     if (_keyword.isNotEmpty) _search(_keyword);
   }
 
-  Future<void> _play(Song song) async {
-    final outcome = await widget.library.playSong(song, widget.player, resumeCurrent: true);
-    if (!mounted) return;
-    final notice = outcome.notice;
-    if (notice != null) showMusicNotice(context, notice);
+  Future<void> _play(Song song, {bool openPlayer = false}) async {
+    if (_pendingSongId != null) return;
+    setState(() => _pendingSongId = song.id);
+    try {
+      await playSongFromList(
+        context,
+        trackId: song.id,
+        player: widget.player,
+        library: widget.library,
+        play: () => widget.library.playSong(song, widget.player, resumeCurrent: true),
+        openPlayer: openPlayer,
+      );
+    } finally {
+      if (mounted) setState(() => _pendingSongId = null);
+    }
   }
 
   Future<void> _playAll(List<Song> songs) async {
@@ -537,6 +549,8 @@ class _SearchPageState extends State<SearchPage> {
       song: song,
       index: index + 1,
       selected: selected,
+      loading: _pendingSongId == song.id,
+      onTap: () => _play(song, openPlayer: true),
       onPlay: () => _play(song),
       onPause: selected && playback.playing
           ? () => runPlayerAction(context, () => widget.player.pauseTrack(song.id))

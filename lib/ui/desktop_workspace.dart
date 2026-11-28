@@ -44,7 +44,7 @@ class DesktopWorkspace extends StatefulWidget {
   final AppSection section;
   final Widget discover;
   final Widget? search;
-  final Widget queue;
+  final Widget Function(VoidCallback onOpenPlayer) queue;
   final List<Widget> sidebarActions;
   final ValueChanged<AppSection> onSelect;
   final ValueChanged<String> onSearch;
@@ -242,7 +242,7 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
         cover: playlist.cover,
         description: playlist.description,
         playlist: playlist,
-        loader: () => widget.library.playlistSongs(playlist),
+        loader: () => widget.library.likedSongs(playlist: playlist),
         library: widget.library,
         player: widget.player,
       ),
@@ -706,7 +706,7 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
               onPressed: () => setState(() => _queueVisible = false),
             ),
           ),
-          Expanded(child: widget.queue),
+          Expanded(child: widget.queue(() => _openNowPlaying(showLyrics: false))),
         ],
       ),
     );

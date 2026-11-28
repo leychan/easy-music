@@ -5,6 +5,7 @@ import '../player/playback.dart';
 import '../player/track.dart';
 import 'cover.dart';
 import 'music_toast.dart';
+import 'now_playing.dart';
 import 'workspace_page.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -24,9 +25,13 @@ class _HistoryPageState extends State<HistoryPage> {
     if (_pendingId != null) return;
     setState(() => _pendingId = track.id);
     try {
-      final outcome = await widget.library.replay(track, widget.player);
-      final notice = outcome.notice;
-      if (mounted && notice != null) showMusicNotice(context, notice);
+      await playSongFromList(
+        context,
+        trackId: track.id,
+        player: widget.player,
+        library: widget.library,
+        play: () => widget.library.replay(track, widget.player),
+      );
     } finally {
       if (mounted) setState(() => _pendingId = null);
     }

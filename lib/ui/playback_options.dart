@@ -140,21 +140,30 @@ class _QualityButtonState extends State<QualityButton> {
           CheckedPopupMenuItem(
             value: quality,
             checked: preferred == quality,
-            child: Text(quality.label),
+            child: Text(
+              quality == AudioQuality.high ? '高品（320 kbps）' : quality.label,
+            ),
           ),
       ],
       child: Padding(
         padding: const EdgeInsets.all(12),
+        // 按实际播放的音质显示图标，避免降档时仍显示 HQ。
         child: _busy
             ? const SizedBox.square(
                 dimension: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : Text(
-                widget.track?.audioQuality?.label ?? '音质',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            : switch (widget.track?.audioQuality) {
+                AudioQuality.high => const Icon(
+                    Icons.high_quality_outlined,
+                    semanticLabel: '高品',
+                  ),
+                final quality => Text(
+                    quality?.label ?? '音质',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              },
       ),
     ),
   );

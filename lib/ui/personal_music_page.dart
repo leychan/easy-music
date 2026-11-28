@@ -10,6 +10,7 @@ import 'catalog_pages.dart';
 import 'cover.dart';
 import 'discover_page.dart';
 import 'music_toast.dart';
+import 'now_playing.dart';
 import 'player_controls.dart' show runPlayerAction;
 import 'song_tile.dart';
 import 'workspace_page.dart';
@@ -37,6 +38,7 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
   int _attempt = 0;
   List<Object> _items = const [];
   String? _error;
+  String? _pendingSongId;
   bool _uploading = false;
   double? _uploadProgress;
 
@@ -83,14 +85,25 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
     }
   }
 
-  Future<void> _play(Object item) async {
-    final outcome = switch (item) {
-      CloudTrack track => await widget.library.playCloud(track, widget.player, resumeCurrent: true),
-      Song song => await widget.library.playSong(song, widget.player, resumeCurrent: true),
-      _ => const PlaybackOutcome.unavailable(),
-    };
-    final message = outcome.notice;
-    if (mounted && message != null) showMusicNotice(context, message);
+  Future<void> _play(Object item, String trackId, {bool openPlayer = false}) async {
+    if (_pendingSongId != null) return;
+    setState(() => _pendingSongId = trackId);
+    try {
+      await playSongFromList(
+        context,
+        trackId: trackId,
+        player: widget.player,
+        library: widget.library,
+        play: () async => switch (item) {
+          CloudTrack track => widget.library.playCloud(track, widget.player, resumeCurrent: true),
+          Song song => widget.library.playSong(song, widget.player, resumeCurrent: true),
+          _ => const PlaybackOutcome.unavailable(),
+        },
+        openPlayer: openPlayer,
+      );
+    } finally {
+      if (mounted) setState(() => _pendingSongId = null);
+    }
   }
 
   // 云盘里同名的文件用云盘队列 ID 匹配，和曲库里的歌曲分开。
@@ -231,7 +244,9 @@ class _PersonalMusicPageState extends State<PersonalMusicPage> {
                       SongTile(
                         song: item is CloudTrack ? item.song : item as Song,
                         selected: trackId == playback.trackId,
-                        onPlay: () => _play(item),
+                        loading: _pendingSongId == trackId,
+                        onTap: () => _play(item, trackId, openPlayer: true),
+                        onPlay: () => _play(item, trackId),
                         onPause: playback.playing && trackId == playback.trackId
                             ? () => runPlayerAction(context, () => widget.player.pauseTrack(trackId))
                             : null,

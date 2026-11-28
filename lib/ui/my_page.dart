@@ -243,12 +243,15 @@ class _MyPlaylistsPageState extends State<MyPlaylistsPage> {
   }
 
   Future<void> _openPlaylist(Playlist playlist) async {
+    final isLiked = playlist == widget.library.likedPlaylist(_playlists);
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => SongListPage(
           title: playlist.name,
           subtitle: playlist.songCount > 0 ? '${playlist.songCount} 首' : null,
-          loader: () => widget.library.playlistSongs(playlist),
+          loader: isLiked
+              ? () => widget.library.likedSongs(playlist: playlist)
+              : () => widget.library.playlistSongs(playlist),
           player: widget.player,
           library: widget.library,
           playlist: playlist,

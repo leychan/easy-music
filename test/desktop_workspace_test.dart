@@ -888,6 +888,93 @@ void main() {
     });
   }
 
+  testWidgets('Android 窗口变宽时平铺更多歌单，队列可停靠并保留搜索状态', (tester) async {
+    const songRoute = '/v2/search/song';
+    final requests = <Uri>[];
+    await mount(
+      tester, TargetPlatform.android, const Size(390, 760),
+      requests: requests,
+      respond: (request) => switch (request.url.path) {
+        songRoute => {
+          'status': 1,
+          'data': {'lists': [
+            for (var index = 1; index <= 20; index++)
+              {'SongName': '搜索结果 $index', 'FileHash': 'ABC$index', 'Audioid': index},
+          ]},
+        },
+        '/v2/special_recommend' => {
+          'status': 1,
+          'data': {'special_list': [
+            for (var index = 1; index <= 8; index++)
+              {'gid': 'tablet-playlist-$index', 'name': '平板歌单 $index'},
+          ]},
+        },
+        _ => null,
+      },
+    );
+
+    Future<void> resize(Size size) async {
+      tester.view.physicalSize = size;
+      await tester.pumpAndSettle();
+    }
+
+    final rail = find.byType(NavigationRail);
+    final fourthPlaylist = find.text('平板歌单 4');
+    expect(fourthPlaylist.hitTestable(), findsNothing);
+    await resize(const Size(800, 900));
+    expect(rail, findsOneWidget);
+    expect(find.byType(NavigationDestination), findsNothing);
+    await tester.ensureVisible(find.text('平板歌单 1'));
+    await tester.pumpAndSettle();
+    expect(fourthPlaylist.hitTestable(), findsOneWidget);
+
+    await tester.tap(find.descendant(of: rail, matching: find.text('搜索')));
+    await tester.pumpAndSettle();
+    final page = find.byType(SearchPage);
+    final input = find.descendant(of: page, matching: find.byType(TextField));
+    final songFilter = find.widgetWithText(ChoiceChip, '歌曲');
+    final results = find.descendant(of: page, matching: find.byType(CustomScrollView));
+    await tester.tap(songFilter);
+    await tester.enterText(input, '晴天');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    final scroll = tester.widget<CustomScrollView>(results).controller!;
+    scroll.jumpTo(440);
+    await tester.pumpAndSettle();
+
+    final queue = find.text('播放队列');
+    final openQueue = find.byTooltip('打开播放队列');
+    final overlayWidth = tester.getSize(page).width;
+    await tester.tap(openQueue);
+    await tester.pumpAndSettle();
+    expect(queue, findsOneWidget);
+    expect(tester.getSize(page).width, overlayWidth);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(queue, findsNothing);
+
+    await tester.tap(openQueue);
+    await tester.pumpAndSettle();
+    await resize(const Size(1100, 700));
+    expect(tester.getRect(page).right, lessThan(tester.getTopLeft(queue).dx));
+    expect(tester.widget<TextField>(input).controller?.text, '晴天');
+    expect(tester.widget<ChoiceChip>(songFilter).selected, isTrue);
+    expect(tester.widget<CustomScrollView>(results).controller, same(scroll));
+    expect(scroll.offset, 440);
+
+    await resize(const Size(590, 800));
+    expect(rail, findsNothing);
+    expect(queue, findsOneWidget);
+    await tester.tap(find.widgetWithText(NavigationDestination, '搜索'));
+    await tester.pumpAndSettle();
+    expect(queue, findsNothing);
+    expect(tester.widget<TextField>(input).controller?.text, '晴天');
+    expect(tester.widget<CustomScrollView>(results).controller, same(scroll));
+    expect(scroll.offset, 440);
+    expect(requests.where((url) => url.path == songRoute), hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Linux 返回发现不刷新，手动刷新只更新每日推荐', (tester) async {
     final requests = <Uri>[];
     const fmRoute = '/v2/personal_recommend';
@@ -1114,6 +1201,105 @@ void main() {
     });
   }
 
+  for (final platform in [TargetPlatform.android, TargetPlatform.linux]) {
+    testWidgets('${platform.name} 点击队列歌曲打开播放页', (tester) async {
+      final desktop = platform == TargetPlatform.linux;
+      final player = await mount(
+        tester, platform, desktop ? const Size(1280, 760) : const Size(800, 900),
+      );
+      await tester.tap(find.byTooltip('打开播放队列'));
+      await tester.pumpAndSettle();
+      player.playbackState.add(PlaybackState(
+        queueIndex: 0, playing: true, processingState: AudioProcessingState.ready,
+      ));
+      await tester.pump();
+      await tester.tap(find.descendant(
+        of: find.byType(ReorderableListView), matching: find.text('队列测试歌曲'),
+      ));
+      await tester.pumpAndSettle();
+      final page = find.byType(NowPlayingPage);
+      expect(page, findsOneWidget);
+      expect(find.descendant(of: page, matching: find.text('队列测试歌曲')), findsOneWidget);
+      if (desktop) {
+        expect(find.descendant(of: find.byType(DesktopWorkspace), matching: page), findsOneWidget);
+        expect(find.byType(DesktopPlayerBar), findsNothing);
+      }
+    });
+  }
+
+  testWidgets('Android 平板播放选项放在封面列底部，并保留展开歌词状态', (tester) async {
+    const safeTop = 24.0;
+    const safeBottom = 16.0;
+    final player = await mount(
+      tester, TargetPlatform.android, const Size(800, 900),
+      initialTrack: Track(
+        id: 'kg:A1', title: '队列测试歌曲',
+        source: Uri.parse('https://example.org/test.mp3'),
+        lyrics: '[00:00.00]用于测试的歌词',
+        artUri: Uri.parse('https://example.org/test-cover.png'),
+      ),
+    );
+    tester.view.padding = const FakeViewPadding(top: safeTop, bottom: safeBottom);
+    addTearDown(tester.view.resetPadding);
+    final page = find.byType(NowPlayingPage);
+    final artwork = find.byKey(const ValueKey('now-playing-artwork'));
+    final lyrics = find.byType(SyncedLyrics);
+    await tester.tap(find.text('队列测试歌曲'));
+    await tester.pumpAndSettle();
+    final stage = tester.element(page);
+    final track = player.tracks.value[player.index];
+    expect(tester.getRect(artwork).right, lessThan(tester.getRect(lyrics).left));
+    void expectLyricsCentered() {
+      final bounds = tester.getRect(lyrics);
+      expect(bounds.top - safeTop, closeTo(tester.getRect(page).bottom - safeBottom - bounds.bottom, 1));
+      expect(tester.getCenter(find.text('用于测试的歌词')).dy, closeTo(bounds.center.dy, 1));
+    }
+    void expectOptionsOnLeft() {
+      final bar = find.ancestor(of: find.byTooltip('展开歌词'), matching: find.byType(Wrap)).first;
+      final playerViewport = find.ancestor(
+        of: find.byType(PlayerControls), matching: find.byType(SingleChildScrollView),
+      ).first;
+      final topGap = tester.getRect(bar).top - tester.getRect(playerViewport).bottom;
+      final bottomGap = tester.getRect(page).bottom - safeBottom - tester.getRect(bar).bottom;
+      expect(topGap, closeTo(bottomGap, 1));
+      expect(bottomGap, greaterThan(4));
+      for (final option in ['展开歌词', '播放速度', '首选音质', '收藏歌曲']) {
+        final button = find.byTooltip(option).hitTestable();
+        expect(button, findsOneWidget);
+        expect(tester.getRect(button).right, lessThan(tester.getRect(lyrics).left));
+        expect(tester.getCenter(button).dy, greaterThan(tester.getRect(artwork).bottom));
+      }
+    }
+    expectLyricsCentered();
+    expectOptionsOnLeft();
+
+    tester.view.physicalSize = const Size(660, 430);
+    await tester.pumpAndSettle();
+    expectLyricsCentered();
+    expectOptionsOnLeft();
+
+    tester.view.physicalSize = const Size(1024, 360);
+    await tester.pumpAndSettle();
+    expect(tester.element(page), same(stage));
+    expect(tester.getRect(artwork).right, lessThan(tester.getRect(lyrics).left));
+    expectLyricsCentered();
+    expectOptionsOnLeft();
+    await tester.tap(find.byTooltip('展开歌词'));
+    await tester.pumpAndSettle();
+    expect(artwork, findsNothing);
+
+    tester.view.physicalSize = const Size(390, 760);
+    await tester.pumpAndSettle();
+    expect(tester.element(page), same(stage));
+    expect(artwork, findsNothing);
+    expect(lyrics, findsOneWidget);
+    expect(player.tracks.value[player.index], same(track));
+    await tester.tap(find.byTooltip('显示封面'));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(artwork).bottom, lessThan(tester.getRect(lyrics).top));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Android 窄屏同时显示封面和可滚动歌词，底部播放控件固定', (tester) async {
     const title = '队列测试歌曲';
     const artist = '测试歌手';
@@ -1121,6 +1307,7 @@ void main() {
     await mount(tester, TargetPlatform.android, const Size(390, 760),
       initialTrack: Track(
         id: 'kg:A1', title: title, artist: artist,
+        audioQuality: AudioQuality.high,
         source: Uri.parse('https://example.org/test.mp3'),
         artUri: Uri.parse('https://example.org/test-cover.png'),
         lyrics: List.generate(24, (index) =>
@@ -1214,6 +1401,13 @@ void main() {
     expect(find.byIcon(Icons.shuffle_rounded), findsNothing);
     expect(find.byTooltip('手动切歌淡入淡出'), findsNothing);
     expect(find.byTooltip('播放').hitTestable(), findsOneWidget);
+
+    expect(find.descendant(of: quality, matching: find.byIcon(Icons.high_quality_outlined)), findsOneWidget);
+    await tester.tap(quality);
+    await tester.pumpAndSettle();
+    expect(find.text('高品（320 kbps）'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
 
     for (final (current, next) in const [
       ('顺序播放', '列表循环'),
@@ -1664,6 +1858,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('收藏歌曲甲'), findsNothing);
     expect(find.text('这个列表里还没有歌曲。'), findsOneWidget);
+  });
+
+  testWidgets('桌面我喜欢跨页按收藏时间从新到旧排序', (tester) async {
+    Map<String, Object> row(int id, String title, int time) => {
+      'name': title, 'hash': 'LIKE$id', 'mixsongid': id, 'fileid': id, 'collecttime': time,
+    };
+    await mount(
+      tester, TargetPlatform.linux, const Size(1280, 760),
+      emptyQueue: true,
+      session: const KugouSession(userid: 47, token: 'order-test', nickname: '测试账号', avatar: ''),
+      respond: (request) {
+        if (request.url.path == '/v7/get_all_list') {
+          return {'status': 1, 'data': {'info': [{'listid': 8, 'name': '我喜欢', 'is_def': 1}]}};
+        }
+        if (request.url.path == '/v4/get_list_all_file_v3') {
+          final page = jsonDecode(request.body)['page'];
+          return {'status': 1, 'data': {'info': switch (page) {
+            1 => [
+              row(1, '收藏第二新', 1710000010),
+              for (var i = 2; i <= 300; i++) row(i, '较早收藏 $i', 1600000000 + i),
+            ],
+            2 => [
+              row(301, '收藏最新', 1710000020),
+              row(302, '收藏第三新', 1710000000),
+            ],
+            _ => const [],
+          }}};
+        }
+        return null;
+      },
+    );
+    await tester.tap(find.byTooltip('我喜欢'));
+    await tester.pumpAndSettle();
+    final positions = [
+      for (final title in ['收藏最新', '收藏第二新', '收藏第三新'])
+        tester.getTopLeft(find.text(title)).dy,
+    ];
+    expect(positions, orderedEquals([...positions]..sort()));
   });
 
   testWidgets('Android 立即登录和退出自动返回我的，设置沿用已有偏好', (tester) async {

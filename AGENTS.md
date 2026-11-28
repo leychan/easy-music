@@ -18,3 +18,7 @@
 | Android ARM64 | `flutter build apk --release --target-platform android-arm64` | `build/app/outputs/flutter-apk/app-release.apk` |
 
 如果 Flutter 找不到 Android SDK，或系统默认 JDK 与 Gradle 不兼容，为本次打包命令指定 `ANDROID_HOME` 和 `JAVA_HOME`。当前开发机可使用 `$HOME/Android/Sdk` 和 `/usr/lib/jvm/java-20-jdk`。
+
+## 安卓打包后覆盖安装
+
+Android APK 构建成功并核对产物后，运行 `adb devices -l` 检查手机是否已连接。发现状态为 `device` 的目标手机时，直接运行 `adb -s <设备序列号> install -r build/app/outputs/flutter-apk/app-release.apk`，保留应用数据。没有可用手机时跳过安装。回复中说明安装是否成功，或说明手机拒绝安装等阻碍。

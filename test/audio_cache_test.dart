@@ -83,8 +83,17 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('完整音频写入磁盘，重启后可离线读取和拖动进度', () async {
+  test('完整音频可供分轨读取，重启后可离线读取和拖动进度', () async {
     final song = track('song');
+    expect(cache.canProxyTrack(song), isTrue);
+    expect(cache.canProxyTrack(song.copyWith(source: Uri.parse('https://example.org/stream.m3u8'))), isFalse);
+    expect(cache.canProxyTrack(song.copyWith(source: Uri.parse('https://kugou.invalid/song'))), isFalse);
+    Future<HttpClientResponse> readCached() async =>
+        (await client.getUrl(cache.cachedPlaybackUri(song))).close();
+    final missing = await readCached();
+    expect(missing.statusCode, HttpStatus.notFound);
+    await missing.drain<void>();
+    expect(originRequests, 0);
     expect(await read(await response(song)), audio);
     await waitForTracks(1);
     expect(cache.usage.value.bytes, audio.length);
@@ -92,6 +101,8 @@ void main() {
     cache = await AudioCache.open(directory, store);
     await origin.close(force: true);
     expect(cache.usage.value.tracks, 1);
+    expect(await read(await response(song)), audio);
+    expect(await read(await readCached()), audio);
 
     final partial = await response(song, range: 'bytes=100-199');
     expect(partial.statusCode, HttpStatus.partialContent);

@@ -504,6 +504,7 @@ void main() {
                 'hash': 'b3a52a7a958bf0aed0ebfba2e9a818b7',
                 'name': '周杰伦 - 晴天.mp3',
                 'fileid': 9,
+                'collecttime': '1750000000',
                 'audio_id': 34,
                 'mixsongid': '20505418',
                 'timelen': 269792,
@@ -535,6 +536,8 @@ void main() {
       expect(song.albumAudioId, 20505418);
       expect(song.duration.inMilliseconds, 269792);
       expect(song.payType, 3);
+      expect(song.collectedAt, 1750000000);
+      expect(song.withCover('https://example.org/cover.jpg').collectedAt, song.collectedAt);
       final request = requests.single;
       expect(request.url.path, '/v4/get_list_all_file_v3');
       expect(request.headers['x-router'], 'cloudlist.service.kugou.com');

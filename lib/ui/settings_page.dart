@@ -28,6 +28,39 @@ class SettingsPage extends StatelessWidget {
         children: [
           PlaybackQualityTile(player: player),
           PlaybackFadeTile(player: player),
+          if (player.stemMixer != null)
+            ValueListenableBuilder(
+              valueListenable: player.showStemMixButton,
+              builder: (context, show, _) => SwitchListTile(
+                secondary: const Icon(Icons.tune_rounded),
+                title: const Text('显示人声 / 伴奏按钮'),
+                value: show,
+                onChanged: (value) {
+                  try {
+                    player.setShowStemMixButton(value);
+                  } on Exception {
+                    showMusicNotice(context, '无法保存人声 / 伴奏按钮设置。');
+                  }
+                },
+              ),
+            ),
+          if (player.stemMixer != null)
+            ValueListenableBuilder(
+              valueListenable: player.experimentalKaraoke,
+              builder: (context, enabled, _) => SwitchListTile(
+                secondary: const Icon(Icons.mic_none_rounded),
+                title: const Text('K 歌耳返'),
+                subtitle: const Text('实验性功能'),
+                value: enabled,
+                onChanged: (value) async {
+                  try {
+                    await player.setExperimentalKaraoke(value);
+                  } on Exception {
+                    if (context.mounted) showMusicNotice(context, '无法更新 K 歌耳返设置。');
+                  }
+                },
+              ),
+            ),
           if (player.audioCache case final cache?)
             ValueListenableBuilder(
               valueListenable: cache.usage,

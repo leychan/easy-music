@@ -27,6 +27,7 @@ class AudioCache {
   static final _byteRange = RegExp(r'^bytes=(\d*)-(\d*)$');
   static final _contentRange = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$');
   static const _maxPendingFiles = 8;
+  static const _playlistExtensions = {'.m3u8', '.m3u', '.mpd', '.pls'};
 
   final Directory _directory;
   final SessionStore _store;
@@ -86,14 +87,21 @@ class AudioCache {
     return cache;
   }
 
+  bool canProxyTrack(Track track) =>
+      _canProxy(track.source) &&
+      track.source.host != 'kugou.invalid' &&
+      !_playlistExtensions.contains(p.extension(track.source.path).toLowerCase());
+
+  /// 分轨复用同一音质的缓存标识，避免临时播放地址更新后找不到已分好的音轨。
+  String stemCacheKey(Track track) => _key(track);
+
+  Uri cachedPlaybackUri(Track track) =>
+      playbackUri(track).replace(queryParameters: {'cachedOnly': '1'});
+
   Uri playbackUri(Track track) {
     final origin = track.source;
+    if (!canProxyTrack(track)) return origin;
     final extension = p.extension(origin.path).toLowerCase();
-    if (!_canProxy(origin) ||
-        origin.host == 'kugou.invalid' ||
-        const {'.m3u8', '.m3u', '.mpd', '.pls'}.contains(extension)) {
-      return origin;
-    }
     final key = _hash([
       track.id,
       track.albumAudioId,
@@ -199,7 +207,9 @@ class AudioCache {
       final key = _key(track);
       final cached = await _openCached(key);
       if (cached != null) {
-        await _serveCached(request, cached.file, cached.bytes);
+        await _serveCached(request, cached.file, cached.bytes, cached.etag);
+      } else if (request.uri.queryParameters['cachedOnly'] == '1') {
+        response.statusCode = HttpStatus.notFound;
       } else {
         await _serveOrigin(request, track.source, key, generation);
       }
@@ -220,7 +230,7 @@ class AudioCache {
     }
   }
 
-  Future<({RandomAccessFile file, int bytes})?> _openCached(String key) =>
+  Future<({RandomAccessFile file, int bytes, String? etag})?> _openCached(String key) =>
       _lock.synchronized(() async {
         final entry = _limit == 0 ? null : _entries[key];
         if (entry == null) return null;
@@ -240,17 +250,19 @@ class AudioCache {
         } on FileSystemException {
           // 更新时间失败时，本次播放仍可使用已打开的文件。
         }
-        return (file: file, bytes: entry.bytes);
+        return (file: file, bytes: entry.bytes, etag: entry.etag);
       });
 
   Future<void> _serveCached(
     HttpRequest request,
     RandomAccessFile file,
     int bytes,
+    String? etag,
   ) async {
     try {
       final response = request.response;
       response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      if (etag != null) response.headers.set(HttpHeaders.etagHeader, etag);
       response.headers.contentType = ContentType.binary;
       var start = 0;
       var end = bytes - 1;
@@ -312,6 +324,7 @@ class AudioCache {
       HttpHeaders.contentRangeHeader,
       HttpHeaders.acceptRangesHeader,
       HttpHeaders.contentEncodingHeader,
+      HttpHeaders.etagHeader,
     ]) {
       if (upstream.headers[header] case final values?) {
         response.headers.set(header, values);
@@ -473,7 +486,7 @@ class AudioCache {
     await writing.handle.close();
     final file = await writing.partial.rename(p.join(_directory.path, '${writing.key}.audio'));
     _writes.remove(writing.key);
-    _entries[writing.key] = _CacheEntry(file, writing.bytes, DateTime.now());
+    _entries[writing.key] = _CacheEntry(file, writing.bytes, DateTime.now(), etag: writing.etag);
     _bytes += writing.bytes;
   }
 
@@ -501,10 +514,11 @@ class AudioCache {
 }
 
 class _CacheEntry {
-  _CacheEntry(this.file, this.bytes, this.used);
+  _CacheEntry(this.file, this.bytes, this.used, {this.etag});
 
   final File file;
   final int bytes;
+  final String? etag;
   DateTime used;
 }
 

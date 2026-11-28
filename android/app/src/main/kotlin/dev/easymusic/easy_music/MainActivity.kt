@@ -16,9 +16,13 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : AudioServiceActivity() {
     private var notificationPermissionResult: MethodChannel.Result? = null
+    private var microphonePermissionResult: MethodChannel.Result? = null
+    private var stemPlugin: StemPlugin? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        stemPlugin = (flutterEngine.plugins.get(StemPlugin::class.java) as? StemPlugin)
+            ?: StemPlugin().also { flutterEngine.plugins.add(it) }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "dev.easymusic.easy_music/external"
@@ -49,6 +53,18 @@ class MainActivity : AudioServiceActivity() {
                     "playbackNotificationNotice" -> {
                         if (value != null) Toast.makeText(applicationContext, value, Toast.LENGTH_SHORT).show()
                     }
+                    "karaokeMicrophonePermission" -> {
+                        when {
+                            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED ->
+                                result.success(true)
+                            microphonePermissionResult != null -> result.success(false)
+                            else -> {
+                                microphonePermissionResult = result
+                                requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), KARAOKE_MICROPHONE_REQUEST)
+                            }
+                        }
+                        return@setMethodCallHandler
+                    }
                     "quit" -> finishAndRemoveTask()
                     else -> {
                         result.notImplemented()
@@ -65,6 +81,16 @@ class MainActivity : AudioServiceActivity() {
     override fun onPostResume() {
         super.onPostResume()
         AudioService.showPlaybackNotification()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        stemPlugin?.setForeground(true)
+    }
+
+    override fun onStop() {
+        stemPlugin?.setForeground(false)
+        super.onStop()
     }
 
     private fun managePlaybackNotifications(automatic: Boolean, result: MethodChannel.Result) {
@@ -107,16 +133,23 @@ class MainActivity : AudioServiceActivity() {
             notificationPermissionResult = null
             AudioService.showPlaybackNotification()
             result?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        } else if (requestCode == KARAOKE_MICROPHONE_REQUEST) {
+            val result = microphonePermissionResult
+            microphonePermissionResult = null
+            result?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
         }
     }
 
     override fun onDestroy() {
         notificationPermissionResult?.success(false)
         notificationPermissionResult = null
+        microphonePermissionResult?.success(false)
+        microphonePermissionResult = null
         super.onDestroy()
     }
 
     private companion object {
         const val PLAYBACK_NOTIFICATION_REQUEST = 137
+        const val KARAOKE_MICROPHONE_REQUEST = 138
     }
 }

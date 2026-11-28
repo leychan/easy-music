@@ -54,6 +54,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   final _desktopSearch = ValueNotifier<DesktopSearchRequest?>(null);
   bool _searchOpened = false;
   bool _pickingFile = false;
+  bool _selectingQueueTrack = false;
   bool _checkedPlaybackNotifications = false;
   bool _mini = false;
   bool _desktopLyrics = false;
@@ -379,7 +380,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               AppSection.discover, desktop: true, active: section == AppSection.discover,
             ),
             search: _searchOpened ? _buildSection(AppSection.search, desktop: true) : null,
-            queue: _queuePanel(),
+            queue: _queuePanel,
             sidebarActions: [_addMusicMenu(), if (Platform.isLinux) _desktopMenu()],
             onSelect: _selectSection,
             onSearch: (keyword) {
@@ -390,11 +391,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         },
       );
     }
-    return _buildBody(MiniPlayerBar(
-      player: player,
-      library: _library,
-      onOpen: _showNowPlaying,
-    ));
+    return _buildBody();
   }
 
   Widget _addMusicMenu() => PopupMenuButton<String>(
@@ -460,74 +457,56 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     ),
   );
 
-  Widget _queuePanel() => _QueuePanel(
+  Widget _queuePanel([VoidCallback? onOpenPlayer]) => _QueuePanel(
     player: player,
-    onSelect: player.skipToQueueItem,
+    onSelect: (context, track) => _selectQueueTrack(context, track, onOpenPlayer),
     onRemove: _remove,
     onAddAudio: _pickAudio,
     onAddLink: _addLink,
   );
+
+  Future<void> _selectQueueTrack(BuildContext context, Track track, VoidCallback? onOpenPlayer) async {
+    if (_selectingQueueTrack) return;
+    _selectingQueueTrack = true;
+    try {
+      await runPlayerAction(context, () => playSongFromList(
+        context,
+        trackId: track.id,
+        player: player,
+        library: _library,
+        onOpenPlayer: onOpenPlayer,
+        play: () async {
+          final index = player.tracks.value.indexWhere((item) => item.id == track.id);
+          if (index < 0) return const PlaybackOutcome.failed('这首歌已从队列移除。');
+          await player.skipToQueueItem(index);
+          return switch (player.message.value) {
+            final message? => PlaybackOutcome.failed(message),
+            null => const PlaybackOutcome.started(),
+          };
+        },
+      ));
+    } finally {
+      _selectingQueueTrack = false;
+    }
+  }
 
   void _selectSection(AppSection section) {
     if (section == AppSection.search) _searchOpened = true;
     _section.value = section;
   }
 
-  Widget _buildBody(Widget playerBar) => ValueListenableBuilder(
+  Widget _buildBody() => ValueListenableBuilder(
     valueListenable: _section,
-    builder: (context, section, _) => LayoutBuilder(
-      builder: (context, constraints) {
-        Widget discover(bool active) => _buildSection(AppSection.discover, active: active);
-        final search = _searchOpened ? _buildSection(AppSection.search) : null;
-        final content = section == AppSection.mine ? _buildSection(section) : null;
-        // 宽屏：左侧队列常驻，右侧内容区切页。
-        if (constraints.maxWidth - MediaQuery.paddingOf(context).horizontal >= 980) {
-          return Scaffold(
-            body: SafeArea(
-              child: Column(
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          SizedBox(width: 320, child: _queuePanel()),
-                          VerticalDivider(
-                            width: 1,
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                          Expanded(
-                            child: Column(
-                              children: [
-                                _SectionBar(
-                                  value: _section,
-                                  onChanged: _selectSection,
-                                  inline: true,
-                                ),
-                                Expanded(child: _MobileSection(
-                                  section: section, discover: discover, search: search, content: content,
-                                )),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    playerBar,
-                  ],
-              ),
-            ),
-          );
-        }
-        // 窄屏：底部导航切换队列与各内容页。
-        return _QueueAwareScaffold(
-          section: section,
-          onChanged: _selectSection,
-          queue: _queuePanel(),
-          discover: discover,
-          search: search,
-          content: content,
-          playerBar: playerBar,
-        );
-      },
+    builder: (context, section, _) => _QueueAwareScaffold(
+      section: section,
+      onChanged: _selectSection,
+      queue: _queuePanel(),
+      discover: (active) => _buildSection(AppSection.discover, active: active),
+      search: _searchOpened ? _buildSection(AppSection.search) : null,
+      content: section == AppSection.mine ? _buildSection(section) : null,
+      player: player,
+      library: _library,
+      onOpenPlayer: _showNowPlaying,
     ),
   );
 
@@ -569,7 +548,7 @@ class _MobileSection extends StatelessWidget {
     required this.section, required this.discover, required this.search, required this.content,
   });
 
-  final AppSection? section;
+  final AppSection section;
   final Widget Function(bool active) discover;
   final Widget? search;
   final Widget? content;
@@ -590,7 +569,7 @@ class _MobileSection extends StatelessWidget {
   );
 }
 
-/// 窄屏内容延伸到悬浮栏下，Scaffold 将底栏实测高度传给各页。
+/// 手机和平板共用一棵页面树，旋转或分屏时保留搜索结果和滚动位置。
 class _QueueAwareScaffold extends StatefulWidget {
   const _QueueAwareScaffold({
     required this.section,
@@ -599,7 +578,9 @@ class _QueueAwareScaffold extends StatefulWidget {
     required this.discover,
     required this.search,
     required this.content,
-    required this.playerBar,
+    required this.player,
+    required this.library,
+    required this.onOpenPlayer,
   });
 
   final AppSection section;
@@ -608,137 +589,167 @@ class _QueueAwareScaffold extends StatefulWidget {
   final Widget Function(bool active) discover;
   final Widget? search;
   final Widget? content;
-  final Widget playerBar;
+  final Playback player;
+  final MusicLibrary library;
+  final void Function({required bool showLyrics}) onOpenPlayer;
 
   @override
   State<_QueueAwareScaffold> createState() => _QueueAwareScaffoldState();
 }
 
 class _QueueAwareScaffoldState extends State<_QueueAwareScaffold> {
+  static const _destinations = [
+    NavigationDestination(
+      icon: Icon(Icons.explore_outlined),
+      selectedIcon: Icon(Icons.explore_rounded),
+      label: '发现',
+    ),
+    NavigationDestination(icon: Icon(Icons.search_rounded), label: '搜索'),
+    NavigationDestination(
+      icon: Icon(Icons.person_outline_rounded),
+      selectedIcon: Icon(Icons.person_rounded),
+      label: '我的',
+    ),
+  ];
+  static const _queueWidth = 312.0;
+  static const _queueInset = 8.0;
+
+  final _queueScroll = ScrollController();
   bool _showQueue = false;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    extendBody: true,
-    body: SafeArea(
-      bottom: false,
-      child: _MobileSection(
-        section: _showQueue ? null : widget.section,
-        discover: widget.discover,
-        search: widget.search,
-        content: _showQueue ? widget.queue : widget.content,
-      ),
-    ),
-    bottomNavigationBar: SafeArea(
-      top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          widget.playerBar,
-          GlassNavigationBar(
-            selectedIndex: _showQueue ? 3 : widget.section.index,
-            onDestinationSelected: (index) {
-              if (index == 3) {
-                setState(() => _showQueue = true);
-                return;
-              }
-              setState(() => _showQueue = false);
-              widget.onChanged(AppSection.values[index]);
-            },
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.explore_outlined),
-                selectedIcon: Icon(Icons.explore_rounded),
-                label: '发现',
+  void dispose() {
+    _queueScroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final width = MediaQuery.sizeOf(context).width - MediaQuery.viewPaddingOf(context).horizontal;
+    final tablet = theme.platform != TargetPlatform.linux && width >= 600;
+    final docked = tablet && width >= 980;
+    final phoneQueue = _showQueue && !tablet;
+    final overlayQueue = _showQueue && tablet && !docked;
+    final queueInset = tablet ? _queueInset : 0.0;
+    void closeQueue() => setState(() => _showQueue = false);
+    void select(int index) {
+      if (_showQueue && !docked) closeQueue();
+      widget.onChanged(AppSection.values[index]);
+    }
+
+    return PopScope(
+      canPop: !_showQueue || docked,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _showQueue && !docked) closeQueue();
+      },
+      child: Scaffold(
+        // 手机内容延伸到悬浮栏下，列表通过 Scaffold 留出的底部间距避让。
+        extendBody: !tablet,
+        body: SafeArea(
+          bottom: false,
+          child: Row(
+            children: [
+              SizedBox(
+                width: tablet ? 80 : 0,
+                child: tablet ? NavigationRail(
+                  labelType: NavigationRailLabelType.all,
+                  scrollable: true,
+                  selectedIndex: widget.section.index,
+                  onDestinationSelected: select,
+                  destinations: [
+                    for (final destination in _destinations)
+                      NavigationRailDestination(
+                        icon: destination.icon,
+                        selectedIcon: destination.selectedIcon,
+                        label: Text(destination.label),
+                      ),
+                  ],
+                ) : null,
               ),
-              NavigationDestination(
-                icon: Icon(Icons.search_rounded),
-                label: '搜索',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.person_outline_rounded),
-                selectedIcon: Icon(Icons.person_rounded),
-                label: '我的',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.queue_music_rounded),
-                label: '队列',
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.only(
+                        right: _showQueue && docked ? _queueWidth + _queueInset : 0,
+                      ),
+                      child: Visibility(
+                        visible: !phoneQueue,
+                        maintainState: true,
+                        child: ExcludeFocus(
+                          excluding: overlayQueue,
+                          child: _MobileSection(
+                            section: widget.section,
+                            discover: widget.discover,
+                            search: widget.search,
+                            content: widget.content,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (overlayQueue)
+                      ModalBarrier(
+                        color: colors.scrim.withValues(alpha: 0.18),
+                        semanticsLabel: '关闭播放队列',
+                        onDismiss: closeQueue,
+                      ),
+                    if (_showQueue)
+                      Positioned(
+                        top: queueInset,
+                        bottom: queueInset,
+                        left: tablet ? null : 0,
+                        right: queueInset,
+                        width: tablet ? _queueWidth : null,
+                        child: Material(
+                          color: tablet ? colors.surfaceContainerLow : Colors.transparent,
+                          borderRadius: tablet ? BorderRadius.circular(16) : null,
+                          clipBehavior: tablet ? Clip.antiAlias : Clip.none,
+                          // 发现页和队列可以同时滚动，各自使用独立的滚动控制器。
+                          child: PrimaryScrollController(
+                            controller: _queueScroll,
+                            child: widget.queue,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
           ),
-        ],
-      ),
-    ),
-  );
-}
-
-/// 宽屏时的横向标签栏。
-class _SectionBar extends StatelessWidget {
-  const _SectionBar({
-    required this.value,
-    required this.onChanged,
-    this.inline = false,
-  });
-
-  final ValueNotifier<AppSection> value;
-  final ValueChanged<AppSection> onChanged;
-  final bool inline;
-
-  static const _labels = {
-    AppSection.discover: '发现',
-    AppSection.search: '搜索',
-    AppSection.mine: '我的',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    if (!inline) return const SizedBox.shrink();
-    return ValueListenableBuilder(
-      valueListenable: value,
-      builder: (context, current, _) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-        child: Row(
-          children: [
-            for (final section in AppSection.values) ...[
-              _TabButton(
-                label: _labels[section]!,
-                selected: section == current,
-                onTap: () => onChanged(section),
+        ),
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              MiniPlayerBar(
+                player: widget.player,
+                library: widget.library,
+                onOpen: widget.onOpenPlayer,
+                onToggleQueue: tablet ? () => setState(() => _showQueue = !_showQueue) : null,
+                queueVisible: _showQueue,
               ),
-              const SizedBox(width: 8),
+              if (!tablet)
+                GlassNavigationBar(
+                  selectedIndex: phoneQueue ? _destinations.length : widget.section.index,
+                  onDestinationSelected: (index) {
+                    if (index == _destinations.length) {
+                      setState(() => _showQueue = true);
+                    } else {
+                      select(index);
+                    }
+                  },
+                  destinations: const [
+                    ..._destinations,
+                    NavigationDestination(icon: Icon(Icons.queue_music_rounded), label: '队列'),
+                  ],
+                ),
             ],
-          ],
+          ),
         ),
-      ),
-    );
-  }
-}
-
-class _TabButton extends StatelessWidget {
-  const _TabButton({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    const radius = BorderRadius.all(Radius.circular(10));
-    return GlassTabSelection(
-      selected: selected,
-      radius: radius,
-      child: TextButton(
-        onPressed: onTap,
-        style: TextButton.styleFrom(
-          foregroundColor: selected ? colors.onPrimaryContainer : null,
-          shape: const RoundedRectangleBorder(borderRadius: radius),
-        ),
-        child: Text(label),
       ),
     );
   }
@@ -802,7 +813,7 @@ class _QueuePanel extends StatelessWidget {
   });
 
   final Playback player;
-  final Future<void> Function(int) onSelect;
+  final Future<void> Function(BuildContext, Track) onSelect;
   final Future<void> Function(Track) onRemove;
   final VoidCallback onAddAudio;
   final VoidCallback onAddLink;
@@ -858,7 +869,7 @@ class _QueuePanel extends StatelessWidget {
                       context,
                       () => player.moveTrack(tracks[from].id, tracks[to].id),
                     ),
-                    itemBuilder: (context, index) {
+                    itemBuilder: (_, index) {
                       final track = tracks[index];
                       // ListTile 的底色画在 Material 上，让它随歌曲行一起被列表裁剪。
                       return Material(
@@ -894,10 +905,7 @@ class _QueuePanel extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          onTap: () => runPlayerAction(
-                            context,
-                            () => onSelect(index),
-                          ),
+                          onTap: () => onSelect(context, track),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [

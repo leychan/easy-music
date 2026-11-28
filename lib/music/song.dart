@@ -38,6 +38,7 @@ class Song {
     this.privilege = 0,
     this.payType = 0,
     this.fileId = 0,
+    this.collectedAt = 0,
   });
 
   /// 本地文件和音频直链没有可写入酷狗收藏的歌曲标识。
@@ -77,6 +78,9 @@ class Song {
   final int payType;
   final int fileId;
 
+  /// 酷狗返回的收藏时间（Unix 秒），未提供时为 0。
+  final int collectedAt;
+
   String get artist => singers.isEmpty ? '未知歌手' : singers.join('、');
 
   /// 版权标记：`privilege <= 0` 表示没有播放权限（下架或纯付费）。
@@ -92,7 +96,7 @@ class Song {
     hash: hash, title: title, albumAudioId: albumAudioId, albumId: albumId,
     albumName: albumName, albumImage: image, singers: singers, duration: duration,
     hash320: hash320, hashFlac: hashFlac, privilege: privilege, payType: payType,
-    fileId: fileId,
+    fileId: fileId, collectedAt: collectedAt,
   );
 
   /// 是否具备取播放地址的最低条件。
@@ -142,6 +146,7 @@ class Song {
       hashFlac: _normalizeHash(json['SQFileHash'] ?? json['SQHash']),
       privilege: _int(json['Privilege']) ?? 0,
       payType: _int(json['PayType']) ?? 0,
+      collectedAt: _firstPositiveInt(json, const ['collecttime', 'collect_time', 'CollectTime']),
     );
   }
 
@@ -255,6 +260,7 @@ class Song {
           _int(json['media_pay_type']) ??
           0,
       fileId: _firstPositiveInt(json, const ['fileid', 'file_id']),
+      collectedAt: _firstPositiveInt(json, const ['collecttime', 'collect_time', 'CollectTime']),
     );
   }
 

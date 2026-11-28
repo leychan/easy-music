@@ -431,14 +431,23 @@ class MusicLibrary extends ChangeNotifier {
     return liked;
   }
 
-  /// 和红心按钮使用同一个酷狗歌单，按页读取当前账号的全部收藏。
-  Future<List<Song>> likedSongs() async {
+  /// 和红心按钮使用同一个酷狗歌单，读取完所有分页后按收藏时间倒序。
+  Future<List<Song>> likedSongs({Playlist? playlist}) async {
     final scope = _favoriteScope(_account.session);
     if (scope == null) throw const KugouFailure('请先登录酷狗账号。');
     final api = _readyApi;
-    final playlist = await _readLikedPlaylist(api, scope);
-    return _playlistPages(api, playlist, favoriteScope: scope)
+    final liked = playlist ?? await _readLikedPlaylist(api, scope);
+    if (!canEditPlaylist(liked)) throw const KugouFailure('账号已变化，请重试。');
+    final songs = await _playlistPages(api, liked, favoriteScope: scope)
         .expand((songs) => songs).toList();
+    final ordered = songs.indexed.toList()..sort((left, right) {
+      final (leftIndex, leftSong) = left;
+      final (rightIndex, rightSong) = right;
+      final byTime = rightSong.collectedAt.compareTo(leftSong.collectedAt);
+      // 同一秒或缺少时间时，按云歌单返回的加入顺序倒排。
+      return byTime != 0 ? byTime : rightIndex.compareTo(leftIndex);
+    });
+    return [for (final (_, song) in ordered) song];
   }
 
   /// 同一账号的多个红心共用收藏状态和一次后台读取。
