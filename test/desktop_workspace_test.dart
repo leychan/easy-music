@@ -1774,6 +1774,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(angle(), greaterThan(0));
+    // 120 Hz 屏幕上的相邻两帧无需为慢速旋转更新两次角度。
+    final coverAngle = angle();
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(angle(), coverAngle);
+    await tester.pump(const Duration(milliseconds: 25));
+    expect(angle(), greaterThan(coverAngle));
     for (final tab in ['搜索', '我的', '队列', '发现']) {
       final previous = angle();
       await tester.tap(find.widgetWithText(NavigationDestination, tab));
@@ -1795,6 +1801,7 @@ void main() {
     expect(angle(), greaterThan(beforeRecents));
 
     setPlaying(false);
+    await tester.pump();
     await tester.pump();
     final paused = angle();
     await tester.pump(const Duration(milliseconds: 350));

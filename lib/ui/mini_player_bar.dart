@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -214,10 +216,13 @@ class _SpinningCover extends StatefulWidget {
 
 class _SpinningCoverState extends State<_SpinningCover>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  static const _rotationPeriod = Duration(seconds: 18);
+  static const _androidFrameInterval = Duration(milliseconds: 33);
   late final _turns = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 18),
+    duration: _rotationPeriod,
   );
+  Timer? _rotationTimer;
 
   @override
   void initState() {
@@ -241,22 +246,39 @@ class _SpinningCoverState extends State<_SpinningCover>
   void didChangeAppLifecycleState(AppLifecycleState state) => _updateRotation();
 
   void _updateRotation() {
+    final android = Theme.of(context).platform == TargetPlatform.android;
     // Android 进入多任务界面时会先失去焦点，这时就可以停下封面动画。
-    final inForeground =
-        Theme.of(context).platform != TargetPlatform.android ||
-        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    final active =
+        !android ||
+        (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+            TickerMode.valuesOf(context).enabled);
     final spinning =
-        widget.spinning &&
-        inForeground &&
-        !MediaQuery.disableAnimationsOf(context);
+        widget.spinning && active && !MediaQuery.disableAnimationsOf(context);
+    if (android && spinning) {
+      if (_turns.isAnimating) _turns.stop();
+      _rotationTimer ??= _startRotationTimer();
+      return;
+    }
+    _rotationTimer?.cancel();
+    _rotationTimer = null;
     // 暂停时保留角度，继续播放后从原处接着转。
     if (spinning && !_turns.isAnimating) _turns.repeat();
     if (!spinning && _turns.isAnimating) _turns.stop();
   }
 
+  Timer _startRotationTimer() {
+    final start = _turns.value;
+    // 一圈要 18 秒，每 33 毫秒更新一次，给系统切换动画留出渲染时间。
+    return Timer.periodic(_androidFrameInterval, (timer) {
+      final elapsed = timer.tick * _androidFrameInterval.inMicroseconds;
+      _turns.value = (start + elapsed / _rotationPeriod.inMicroseconds) % 1;
+    });
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _rotationTimer?.cancel();
     _turns.dispose();
     super.dispose();
   }
