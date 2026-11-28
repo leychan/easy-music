@@ -12,6 +12,119 @@ void main() {
 
   Track track(String id) => Track.online(id, 'https://example.org/$id.mp3');
 
+  test('冷启动续播时保持已选曲目和进度，加载完成后跟随引擎切歌', () async {
+    final native = _NativePlayer(reportFirstTrackWhileLoading: true);
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    const savedPosition = Duration(milliseconds: 410);
+    store.replaceQueue(SavedSession([track('first'), track('saved'), track('next')], 1, savedPosition));
+    final player = Playback(store);
+    addTearDown(player.clearQueue);
+    await player.restore();
+
+    final items = <MediaItem?>[];
+    final states = <PlaybackState>[];
+    final media = player.mediaItem.listen(items.add);
+    final playback = player.playbackState.listen(states.add);
+    addTearDown(media.cancel);
+    addTearDown(playback.cancel);
+    final ready = player.playbackState.firstWhere(
+      (state) => state.playing && state.processingState == AudioProcessingState.ready,
+    );
+    await player.play();
+    await ready.timeout(const Duration(seconds: 2));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(items.map((item) => item?.id), ['saved', 'saved']);
+    expect(items.map((item) => item?.duration), [null, const Duration(seconds: 1)]);
+    expect(states.any((state) => state.processingState == AudioProcessingState.loading), isTrue);
+    expect(states.map((state) => state.queueIndex), everyElement(1));
+    expect(states.map((state) => state.updatePosition), everyElement(greaterThanOrEqualTo(savedPosition)));
+
+    await native.emit(index: 2);
+    await Future<void>.delayed(Duration.zero);
+    expect(items.last?.id, 'next');
+    expect(player.index, 2);
+  });
+
+  test('进度和缓冲变化不刷新界面状态，追加队列会更新下一首按钮', () async {
+    final store = SessionStore(':memory:');
+    addTearDown(store.close);
+    final player = Playback(store);
+    await player.addTracks([track('first')]);
+    final updates = <PlaybackUiState>[];
+    final subscription = player.uiStateStream.listen(updates.add);
+    addTearDown(subscription.cancel);
+    await Future<void>.delayed(Duration.zero);
+    expect(updates.single.queueIndex, 0);
+    expect(updates.single.hasNext, isFalse);
+
+    player.playbackState.add(player.playbackState.value.copyWith(
+      updatePosition: const Duration(seconds: 1),
+      bufferedPosition: const Duration(seconds: 10),
+    ));
+    await Future<void>.delayed(Duration.zero);
+    expect(updates, hasLength(1));
+
+    await player.addTracks([track('second')]);
+    await Future<void>.delayed(Duration.zero);
+    expect(updates, hasLength(2));
+    expect(updates.last.hasNext, isTrue);
+  });
+
+  test('播放进度只在界面可见且订阅中定时刷新', () async {
+    const refreshPeriod = Duration(milliseconds: 200);
+    const savePeriod = Duration(seconds: 5);
+    final timers = <Duration, Timer>{};
+    await runZoned(() async {
+      final native = _NativePlayer();
+      final store = SessionStore(':memory:');
+      addTearDown(store.close);
+      final player = Playback(store);
+      addTearDown(player.clearQueue);
+      await player.restore();
+      expect(timers, isEmpty);
+      final ready = player.playbackState.firstWhere(
+        (state) => state.playing && state.processingState == AudioProcessingState.ready,
+      );
+      await player.replaceTracks([track('current')]);
+      await ready;
+      expect(timers.containsKey(refreshPeriod), isFalse);
+      expect(timers[savePeriod]?.isActive, isTrue);
+
+      final positions = <Duration>[];
+      final subscription = player.positionStream.listen(positions.add);
+      await Future<void>.delayed(Duration.zero);
+      expect(timers[refreshPeriod]?.isActive, isTrue);
+
+      player.setPlaybackUiVisible(false);
+      expect(timers[refreshPeriod]?.isActive, isFalse);
+      expect(timers[savePeriod]?.isActive, isTrue);
+      final lastVisible = positions.last;
+      await native.emit(index: 0, position: const Duration(milliseconds: 800));
+      await Future<void>.delayed(Duration.zero);
+      expect(positions.last, lastVisible);
+
+      player.setPlaybackUiVisible(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(timers[refreshPeriod]?.isActive, isTrue);
+      expect(positions.last, greaterThanOrEqualTo(const Duration(milliseconds: 800)));
+
+      await subscription.cancel();
+      expect(timers[refreshPeriod]?.isActive, isFalse);
+      final paused = player.positionStream.listen(positions.add);
+      await player.pause();
+      expect(timers[refreshPeriod]?.isActive, isFalse);
+      expect(timers[savePeriod]?.isActive, isFalse);
+      expect(store.read().position, greaterThanOrEqualTo(const Duration(milliseconds: 800)));
+      await paused.cancel();
+    }, zoneSpecification: ZoneSpecification(
+      createPeriodicTimer: (self, parent, zone, period, callback) {
+        return timers[period] = parent.createPeriodicTimer(zone, period, callback);
+      },
+    ));
+  });
+
   test('清空队列同时清掉播放状态和持久化数据，较早的整单请求不会恢复队列', () async {
     final store = SessionStore(':memory:');
     addTearDown(store.close);
@@ -269,7 +382,7 @@ void main() {
 
 /// 发送原生播放器的就绪和结束事件，测试实际的续播和队列逻辑。
 class _NativePlayer {
-  _NativePlayer() {
+  _NativePlayer({bool reportFirstTrackWhileLoading = false}) {
     _messenger.setMockMethodCallHandler(_main, (call) async {
       if (call.method == 'init') {
         _id = (call.arguments as Map)['id'] as String;
@@ -285,8 +398,13 @@ class _NativePlayer {
             volumes.add(level);
           }
           if (call.method == 'load') {
+            final args = call.arguments as Map;
+            if (reportFirstTrackWhileLoading) await emit(index: 0, loading: true);
             await emit(
-              index: (call.arguments as Map)['initialIndex'] as int? ?? 0,
+              index: args['initialIndex'] as int? ?? 0,
+              position: reportFirstTrackWhileLoading
+                  ? Duration(microseconds: args['initialPosition'] as int? ?? 0)
+                  : Duration.zero,
             );
             return {'duration': 1000000};
           }
@@ -314,12 +432,13 @@ class _NativePlayer {
   Future<void> emit({
     required int index,
     bool completed = false,
+    bool loading = false,
     Duration position = Duration.zero,
   }) async {
     await _messenger.handlePlatformMessage(
       '$_eventPrefix.$_id',
       const StandardMethodCodec().encodeSuccessEnvelope({
-        'processingState': completed ? 4 : 3,
+        'processingState': completed ? 4 : (loading ? 1 : 3),
         'currentIndex': index,
         'updateTime': DateTime.now().millisecondsSinceEpoch,
         'updatePosition': completed ? 1000000 : position.inMicroseconds,

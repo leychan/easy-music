@@ -1681,6 +1681,14 @@ void main() {
     expect(identical(tester.widget<CustomPaint>(painted).foregroundPainter, painter), isTrue);
     expect(first, greaterThan(0));
     expect(second, closeTo(first * 2, 0.1));
+    player.currentPosition = const Duration(milliseconds: 1100);
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(highlightedWidth(), closeTo(second * 2, 0.1));
+    expect(tester.binding.transientCallbackCount, 0);
+    player.setPosition(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(highlightedWidth(), second);
+    expect(tester.binding.transientCallbackCount, 1);
     player.playbackState.add(PlaybackState());
     await tester.pump();
     player.currentPosition = const Duration(milliseconds: 750);

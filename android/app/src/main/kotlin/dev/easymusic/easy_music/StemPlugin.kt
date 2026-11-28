@@ -70,10 +70,20 @@ internal class StemPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Even
     private val positionTick = object : Runnable {
         override fun run() {
             val current = player ?: return
-            if (current.isPlaying) {
+            if (current.isPlaying && sink != null) {
                 emitPlayback(tick = true)
-                main.postDelayed(this, 180)
+                main.postDelayed(this, positionTickDelay)
             }
+        }
+    }
+
+    // 锁屏时降低同步频率，仍为恢复播放进度保留最近的位置。
+    private val positionTickDelay get() = if (foreground) 180L else 1000L
+
+    private fun schedulePositionTick() {
+        main.removeCallbacks(positionTick)
+        if (player?.isPlaying == true && sink != null) {
+            main.postDelayed(positionTick, positionTickDelay)
         }
     }
 
@@ -108,10 +118,12 @@ internal class StemPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Even
     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
         sink = events
         emitPlayback()
+        schedulePositionTick()
     }
 
     override fun onCancel(arguments: Any?) {
         sink = null
+        schedulePositionTick()
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -186,7 +198,10 @@ internal class StemPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Even
             karaoke = false
             updateMicrophone()
             emitPlayback()
+        } else {
+            emitPlayback(tick = true)
         }
+        schedulePositionTick()
     }
 
     private fun setKaraoke(enabled: Boolean) {
@@ -377,8 +392,7 @@ internal class StemPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Even
                     loadResult = null
                 }
                 emitPlayback()
-                main.removeCallbacks(positionTick)
-                if (current.isPlaying) main.postDelayed(positionTick, 180)
+                schedulePositionTick()
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {

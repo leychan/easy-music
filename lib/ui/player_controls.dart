@@ -45,9 +45,9 @@ class PlayerControls extends StatelessWidget {
         padding: compact || stage
             ? EdgeInsets.zero
             : const EdgeInsets.fromLTRB(16, 6, 16, 10),
-        child: StreamBuilder<PlaybackState>(
-          stream: player.playbackState,
-          initialData: player.playbackState.value,
+        child: StreamBuilder<PlaybackUiState>(
+          stream: player.uiStateStream,
+          initialData: player.uiState,
           builder: (context, stateSnapshot) {
             final state = stateSnapshot.data!;
             final index = state.queueIndex;
@@ -97,7 +97,7 @@ class PlayerControls extends StatelessWidget {
                             ? Icons.fast_rewind_rounded
                             : Icons.skip_previous_rounded,
                       ),
-                      onPressed: !player.hasPrevious
+                      onPressed: !state.hasPrevious
                           ? null
                           : () =>
                                 runPlayerAction(context, player.skipToPrevious),
@@ -154,7 +154,7 @@ class PlayerControls extends StatelessWidget {
                             ? Icons.fast_forward_rounded
                             : Icons.skip_next_rounded,
                       ),
-                      onPressed: !player.hasNext
+                      onPressed: !state.hasNext
                           ? null
                           : () => runPlayerAction(context, player.skipToNext),
                     ),

@@ -75,6 +75,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (Platform.isAndroid) {
+      _updateAndroidPlaybackVisibility(WidgetsBinding.instance.lifecycleState);
+    }
     _account.addListener(_accountChanged);
     unawaited(_account.checkDailyVip());
     _metadataEvents = player.playbackState.listen((_) => _loadTrackDetails());
@@ -143,6 +146,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (Platform.isAndroid) _updateAndroidPlaybackVisibility(state);
     if (state == AppLifecycleState.resumed) {
       if (Platform.isAndroid) {
         player.refreshMediaNotification();
@@ -157,9 +161,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
+  void _updateAndroidPlaybackVisibility(AppLifecycleState? state) {
+    // 下拉通知栏或打开权限弹窗时，应用仍可能在屏幕上可见。
+    player.setPlaybackUiVisible(
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (Platform.isAndroid) player.setPlaybackUiVisible(false);
     unawaited(_metadataEvents.cancel());
     if (_notificationTracks != null) {
       unawaited(_notificationTracks?.cancel());
@@ -823,9 +835,9 @@ class _QueuePanel extends StatelessWidget {
     final theme = Theme.of(context);
     return ValueListenableBuilder(
       valueListenable: player.tracks,
-      builder: (context, tracks, _) => StreamBuilder<PlaybackState>(
-        stream: player.playbackState,
-        initialData: player.playbackState.value,
+      builder: (context, tracks, _) => StreamBuilder<PlaybackUiState>(
+        stream: player.uiStateStream,
+        initialData: player.uiState,
         builder: (context, snapshot) {
           final current = snapshot.data?.queueIndex;
           if (tracks.isEmpty) {

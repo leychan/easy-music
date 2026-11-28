@@ -40,9 +40,9 @@ class DesktopPlayerBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(12, 5, 8, 3),
         child: ListenableBuilder(
           listenable: Listenable.merge([player.tracks, player.queuePreparation]),
-          builder: (context, _) => StreamBuilder<PlaybackState>(
-            stream: player.playbackState,
-            initialData: player.playbackState.value,
+          builder: (context, _) => StreamBuilder<PlaybackUiState>(
+            stream: player.uiStateStream,
+            initialData: player.uiState,
             builder: (context, snapshot) {
               final state = snapshot.data!;
               final tracks = player.tracks.value;

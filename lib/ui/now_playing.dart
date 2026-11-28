@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:ui' show ImageFilter;
 
-import 'package:audio_service/audio_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -174,11 +173,11 @@ class _NowPlayingStageState extends State<_NowPlayingStage> {
     final buttonBackground = colors.onSurface.withValues(alpha: 0.12);
     return ValueListenableBuilder(
       valueListenable: player.tracks,
-      builder: (context, tracks, _) => StreamBuilder<PlaybackState>(
-        stream: player.playbackState,
-        initialData: player.playbackState.value,
+      builder: (context, tracks, _) => StreamBuilder<PlaybackUiState>(
+        stream: player.uiStateStream,
+        initialData: player.uiState,
         builder: (context, snapshot) {
-          final state = snapshot.data ?? player.playbackState.value;
+          final state = snapshot.requireData;
           final index = state.queueIndex;
           final track = index == null ? null : tracks.elementAtOrNull(index);
           final artist = track?.artist.trim() ?? '';

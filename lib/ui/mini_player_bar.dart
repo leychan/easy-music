@@ -33,9 +33,9 @@ class MiniPlayerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: Listenable.merge([player.tracks, player.queuePreparation]),
-    builder: (context, _) => StreamBuilder<PlaybackState>(
-      stream: player.playbackState,
-      initialData: player.playbackState.value,
+    builder: (context, _) => StreamBuilder<PlaybackUiState>(
+      stream: player.uiStateStream,
+      initialData: player.uiState,
       builder: (context, snapshot) {
         final state = snapshot.requireData;
         final index = state.queueIndex;
@@ -74,7 +74,7 @@ class MiniPlayerBar extends StatelessWidget {
     ),
   );
 
-  Widget _identity(Track? track, PlaybackState state, MediaItem? preview) {
+  Widget _identity(Track? track, PlaybackUiState state, MediaItem? preview) {
     final title = preview?.title ?? track?.title ?? '尚未选择音乐';
     final artist = preview != null
         ? preview.artist

@@ -32,13 +32,14 @@ class _SyncedLyricsState extends State<SyncedLyrics>
   final _scroll = ScrollController(keepScrollOffset: false);
   final _viewportKey = GlobalKey();
   final _rowKeys = <int, GlobalKey>{};
-  late final _position = ValueNotifier(widget.player.position);
+  final _position = ValueNotifier(Duration.zero);
   late final Ticker _ticker = createTicker((_) {
     _updatePosition(widget.player.position);
   });
   late StreamSubscription<Duration> _positions;
-  late StreamSubscription<PlaybackState> _playbackStates;
+  late StreamSubscription<PlaybackUiState> _playbackStates;
   late int _active;
+  Duration? _highlightEnd;
   double _initialScrollOffset = 0;
   bool _reduceMotion = false;
 
@@ -49,7 +50,7 @@ class _SyncedLyricsState extends State<SyncedLyrics>
   @override
   void initState() {
     super.initState();
-    _active = activeLyricIndex(widget.lines, _position.value);
+    _resetHighlight();
     _listenToPlayer();
   }
 
@@ -66,29 +67,56 @@ class _SyncedLyricsState extends State<SyncedLyrics>
     if (oldWidget.lines != widget.lines || oldWidget.player != widget.player) {
       _rowKeys.clear();
       _initialScrollOffset = 0;
+      _resetHighlight();
     }
     if (oldWidget.player != widget.player) {
       unawaited(_positions.cancel());
       unawaited(_playbackStates.cancel());
-      _position.value = widget.player.position;
       _listenToPlayer();
     }
-    _active = activeLyricIndex(widget.lines, _position.value);
     _updateTicker();
   }
 
   void _listenToPlayer() {
     _positions = widget.player.positionStream.listen(_updatePosition);
-    _playbackStates = widget.player.playbackState.listen((_) {
+    _playbackStates = widget.player.uiStateStream.listen((_) {
       _updatePosition(widget.player.position);
     });
   }
 
+  void _resetHighlight() {
+    final position = widget.player.position;
+    _active = activeLyricIndex(widget.lines, position);
+    _highlightEnd = _endOfActiveHighlight();
+    _updateHighlightPosition(position);
+  }
+
   void _updatePosition(Duration position) {
     final active = activeLyricIndex(widget.lines, position);
-    if (active != _active) _followLine(active);
-    _position.value = position;
+    if (active != _active) {
+      _followLine(active);
+      _highlightEnd = _endOfActiveHighlight();
+    }
+    _updateHighlightPosition(position);
     _updateTicker();
+  }
+
+  Duration? _endOfActiveHighlight() {
+    if (_active < 0) return null;
+    final words = widget.lines[_active].words;
+    Duration? end;
+    for (final (index, word) in words.indexed) {
+      final wordEnd = word.start + _highlightDuration(word, words.elementAtOrNull(index + 1));
+      if (end == null || wordEnd > end) end = wordEnd;
+    }
+    return end;
+  }
+
+  void _updateHighlightPosition(Duration position) {
+    // 这一句唱完后高亮不会再变，后续进度事件只用来定位下一行。
+    if (_highlightEnd case final end?) {
+      _position.value = position < end ? position : end;
+    }
   }
 
   void _followLine(int active) {
@@ -157,15 +185,16 @@ class _SyncedLyricsState extends State<SyncedLyrics>
     return middle - rowCenter;
   }
 
-  // 引擎能按倍速插值播放位置；逐帧只重绘当前句，暂停或缓冲时停止刷新。
+  // 高亮还在变化时才逐帧绘制。暂停、缓冲或唱完当前句时停止。
   void _updateTicker() {
     final state = widget.player.playbackState.value;
+    final end = _highlightEnd;
     final shouldTick =
         !_reduceMotion &&
         state.playing &&
         state.processingState == AudioProcessingState.ready &&
-        _active >= 0 &&
-        widget.lines[_active].words.isNotEmpty;
+        end != null &&
+        _position.value < end;
     if (shouldTick && !_ticker.isActive) _ticker.start();
     if (!shouldTick && _ticker.isActive) _ticker.stop();
   }
@@ -409,6 +438,12 @@ class _KaraokeLineState extends State<_KaraokeLine> {
   }
 }
 
+Duration _highlightDuration(LyricWord word, LyricWord? next) {
+  if (word.duration > Duration.zero) return word.duration;
+  final interval = next == null ? Duration.zero : next.start - word.start;
+  return interval > Duration.zero ? interval : const Duration(milliseconds: 200);
+}
+
 class _KaraokeHighlight extends CustomPainter {
   _KaraokeHighlight(this.words, this.position, this.text)
     : super(repaint: position);
@@ -442,12 +477,7 @@ class _KaraokeHighlight extends CustomPainter {
       final elapsed = (position.value - word.start).inMicroseconds;
       if (elapsed <= 0) continue;
       final next = words.elementAtOrNull(index + 1);
-      final interval = next == null ? Duration.zero : next.start - word.start;
-      final duration = word.duration > Duration.zero
-          ? word.duration
-          : (interval > Duration.zero
-                ? interval
-                : const Duration(milliseconds: 200));
+      final duration = _highlightDuration(word, next);
       final boxes = _boxes[index];
       final width = boxes.fold(
         0.0,

@@ -18,6 +18,17 @@ enum SleepAction { pause, exit }
 
 typedef TrackPlayback = ({String? trackId, bool playing});
 
+typedef PlaybackUiState = ({
+  int? queueIndex,
+  bool playing,
+  AudioProcessingState processingState,
+  AudioServiceRepeatMode repeatMode,
+  AudioServiceShuffleMode shuffleMode,
+  double speed,
+  bool hasPrevious,
+  bool hasNext,
+});
+
 class QueuePreparation {
   const QueuePreparation(this.preview);
 
@@ -28,20 +39,23 @@ class QueuePreparation {
 class Playback extends BaseAudioHandler {
   Playback(this._store, {this.audioCache}) {
     // playerEvent 同时包含播放状态与引擎的进度、曲目变更。
-    _player.playerEventStream.listen((_) => _publish());
+    _player.playerEventStream.listen((event) {
+      final state = event.playbackEvent.processingState;
+      if (state == audio.ProcessingState.ready || state == audio.ProcessingState.completed) {
+        _pendingOriginalTrackId = null;
+      }
+      _publish();
+    });
     _player.errorStream.listen(_reportPlayerError);
-    if (Platform.isAndroid) {
-      _player.positionStream.listen((value) {
-        if (_mixPlayback == null && !_updatingQueue) _androidPositions.add(value);
-      });
-    }
   }
 
   final SessionStore _store;
   final AudioCache? audioCache;
   final _player = audio.AudioPlayer();
   final _commands = Lock();
-  final _androidPositions = StreamController<Duration>.broadcast();
+  late final _positions = StreamController<Duration>.broadcast(
+    onListen: _updatePositionTimer, onCancel: _updatePositionTimer,
+  );
   late final _showStemMixButton = ValueNotifier(
     _store.readPreference(_stemButtonPreference) == 'true',
   );
@@ -75,7 +89,12 @@ class Playback extends BaseAudioHandler {
   bool _queueDirty = false;
   int _selectedIndex = 0;
   Duration _savedPosition = Duration.zero;
+  String? _pendingOriginalTrackId;
   String? _lastPlayedId;
+  Timer? _positionTimer;
+  Timer? _progressSaveTimer;
+  bool _playbackUiVisible = true;
+  bool _progressSavingEnabled = false;
   Timer? _sleepTimer;
   SleepAction _sleepAction = SleepAction.pause;
   List<String>? _originalQueueOrder;
@@ -94,7 +113,15 @@ class Playback extends BaseAudioHandler {
 
   int get _originalIndex => _player.processingState == audio.ProcessingState.idle
       ? _selectedIndex
-      : _player.currentIndex ?? _selectedIndex;
+      : _pendingOriginalIndex ?? _player.currentIndex ?? _selectedIndex;
+
+  int? get _pendingOriginalIndex {
+    final id = _pendingOriginalTrackId;
+    if (id == null) return null;
+    final slot = tracks.value.indexWhere((track) => track.id == id);
+    return slot < 0 ? null : slot;
+  }
+
   int get index {
     final mixedId = stemMixer?.trackId;
     if (mixedId != null) {
@@ -104,22 +131,45 @@ class Playback extends BaseAudioHandler {
     return _originalIndex;
   }
 
-  Duration get _originalPosition => _player.processingState == audio.ProcessingState.idle
+  Duration get _originalPosition => (_player.processingState == audio.ProcessingState.idle ||
+      _pendingOriginalIndex != null)
       ? _savedPosition
       : _player.position;
   StemPlayback? get _mixPlayback => stemMixer?.playback;
   audio.ProcessingState get _processingState => _mixPlayback?.state ?? _player.processingState;
   bool get _playing => _mixPlayback?.playing ?? _player.playing;
   double get _engineVolume => stemMixer?.active == true ? stemMixer!.masterVolume : _player.volume;
-  Duration? get _duration => _mixPlayback?.duration ?? _player.duration;
+  Duration? get _duration => _mixPlayback?.duration ??
+      (_pendingOriginalIndex == null ? _player.duration : null);
   Duration get position => _mixPlayback?.position ?? _originalPosition;
-  Stream<Duration> get positionStream => Platform.isAndroid ? _androidPositions.stream : _player.positionStream;
+  late final Stream<Duration> positionStream = Stream<Duration>.multi((listener) {
+    // 暂停时新打开的播放页也能立即拿到当前位置。
+    listener.add(position);
+    final subscription = _positions.stream.listen(listener.add);
+    listener.onCancel = subscription.cancel;
+  }, isBroadcast: true).distinct();
   double get volume => _volume;
   Stream<double> get volumeStream => _player.volumeStream.map((_) => volume).distinct();
   ({int plays, int songs, List<ListeningCount> top}) get listeningStats =>
       _store.readListeningStats();
   bool get hasNext => _neighborIndex(1) != null || _continuation?.exhausted == false;
   bool get hasPrevious => _neighborIndex(-1) != null;
+
+  PlaybackUiState get uiState => _uiState(playbackState.value);
+
+  // 进度条单独监听位置，播放页和按钮只在它们依赖的状态改变时更新。
+  late final Stream<PlaybackUiState> uiStateStream = playbackState.map(_uiState).distinct();
+
+  PlaybackUiState _uiState(PlaybackState state) => (
+    queueIndex: state.queueIndex,
+    playing: state.playing,
+    processingState: state.processingState,
+    repeatMode: state.repeatMode,
+    shuffleMode: state.shuffleMode,
+    speed: state.speed,
+    hasPrevious: hasPrevious,
+    hasNext: hasNext,
+  );
 
   TrackPlayback get trackPlayback => _trackPlayback(playbackState.value);
 
@@ -166,10 +216,40 @@ class Playback extends BaseAudioHandler {
       await _setSources(saved.tracks, _selectedIndex, _savedPosition);
       _publishQueue(saved.tracks);
     }
+    _progressSavingEnabled = true;
     _publish(offerResume: true);
-    Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_playing || _queueDirty) saveProgress();
-    });
+  }
+
+  void setPlaybackUiVisible(bool visible) {
+    if (visible == _playbackUiVisible) return;
+    _playbackUiVisible = visible;
+    _updatePositionTimer();
+    if (visible) _publishPosition();
+  }
+
+  void _publishPosition() {
+    if (_playbackUiVisible && _positions.hasListener) _positions.add(position);
+  }
+
+  void _updatePositionTimer() {
+    // 只在有人看进度且原曲实际在播放时刷新，分轨进度由 Android 主动推送。
+    if (_playbackUiVisible && _positions.hasListener && _mixPlayback == null &&
+        _playing && _processingState == audio.ProcessingState.ready) {
+      _positionTimer ??= Timer.periodic(const Duration(milliseconds: 200), (_) => _publishPosition());
+    } else {
+      _positionTimer?.cancel();
+      _positionTimer = null;
+    }
+  }
+
+  void _updateProgressSaveTimer() {
+    if (_progressSavingEnabled &&
+        (_queueDirty || (_playing && _processingState == audio.ProcessingState.ready))) {
+      _progressSaveTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => saveProgress());
+    } else {
+      _progressSaveTimer?.cancel();
+      _progressSaveTimer = null;
+    }
   }
 
   Future<void> _setSources(
@@ -177,13 +257,15 @@ class Playback extends BaseAudioHandler {
     int index,
     Duration position, {
     bool preload = false,
-  }) =>
-      _player.setAudioSources(
-        tracks.map(_audioSource).toList(),
-        preload: preload,
-        initialIndex: index,
-        initialPosition: position,
-      );
+  }) {
+    _pendingOriginalTrackId = null;
+    return _player.setAudioSources(
+      tracks.map(_audioSource).toList(),
+      preload: preload,
+      initialIndex: index,
+      initialPosition: position,
+    );
+  }
 
   bool canMixStems(Track track) => stemMixer != null && _stemSourceAvailable(track);
 
@@ -343,8 +425,10 @@ class Playback extends BaseAudioHandler {
 
   void _onStemPlayback(bool positionOnly) {
     if (_updatingQueue) return;
-    _androidPositions.add(position);
-    if (positionOnly) return;
+    if (positionOnly) {
+      _publishPosition();
+      return;
+    }
     _publish();
     final mixer = stemMixer;
     final id = mixer?.playbackId;
@@ -799,6 +883,9 @@ class Playback extends BaseAudioHandler {
 
   void _publish({bool offerResume = false}) {
     if (_updatingQueue) return;
+    _updatePositionTimer();
+    _publishPosition();
+    _updateProgressSaveTimer();
     final current = tracks.value.elementAtOrNull(index);
     final source = current == null ? null : (current.id, current.source);
     if (source != _lastSource) {
@@ -1139,6 +1226,8 @@ class Playback extends BaseAudioHandler {
     } on Exception catch (error) {
       debugPrint('Cannot save playback session: ${error.runtimeType}');
       message.value = '无法保存播放状态。';
+    } finally {
+      _updateProgressSaveTimer();
     }
   }
 
@@ -1164,6 +1253,10 @@ class Playback extends BaseAudioHandler {
       if (mixer?.active == true) {
         await mixer!.play();
       } else {
+        if (_player.processingState == audio.ProcessingState.idle) {
+          // 引擎冷加载时可能先报告队列首曲和零进度。就绪前继续显示已选曲目。
+          _pendingOriginalTrackId = tracks.value.elementAtOrNull(_selectedIndex)?.id;
+        }
         // play() 会等到暂停或播完，不能占住处理切歌、暂停的锁。
         unawaited(_playUntilPaused());
       }

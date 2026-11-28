@@ -68,6 +68,25 @@ abstract class GeneratePlaybackNotificationAudioService extends DefaultTask {
         if (notificationCreated) {''', '''    private void updateNotification() {
         if (notificationCreated || showNotificationBeforePlayback) {''')
 
+        replaceOnce('''        if (config.androidStopForegroundOnPause) {
+            exitForegroundState();
+        }
+    }
+
+    private void exitForegroundState() {
+        ServiceCompat.stopForeground(this, STOP_FOREGROUND_DETACH);
+        releaseWakeLock();
+    }''', '''        if (config.androidStopForegroundOnPause) {
+            exitForegroundState();
+        }
+        // 暂停时允许 CPU 休眠，同时保留前台服务供锁屏和耳机恢复播放。
+        releaseWakeLock();
+    }
+
+    private void exitForegroundState() {
+        ServiceCompat.stopForeground(this, STOP_FOREGROUND_DETACH);
+    }''')
+
         replaceOnce('''        // Force cancellation of the notification
         getNotificationManager().cancel(NOTIFICATION_ID);''', '''        // 停止播放后丢弃已排队的通知刷新。
         notificationCreated = false;
